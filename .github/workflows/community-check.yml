@@ -6,38 +6,37 @@ on:
     - cron: '0 12 * * *'  # 12pm UTC
     - cron: '0 17 * * *'  # 5pm UTC
     - cron: '0 21 * * *'  # 9pm UTC
-  workflow_dispatch:       # Allow manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - run: npm install
+      - run: npx playwright install chromium --with-deps
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+      - name: Scrape Dino's comments to learn voice
+        env:
+          SKOOL_EMAIL: ${{ secrets.SKOOL_EMAIL }}
+          SKOOL_PASSWORD: ${{ secrets.SKOOL_PASSWORD }}
+        run: node src/scrape-voice.js
 
       - name: Run community check
         env:
           SKOOL_EMAIL: ${{ secrets.SKOOL_EMAIL }}
           SKOOL_PASSWORD: ${{ secrets.SKOOL_PASSWORD }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node src/index.js
 
       - name: Commit updated state
         run: |
           git config user.name "skool-bot"
           git config user.email "bot@selfworkclub.com"
-          git add state.json
-          git diff --staged --quiet || git commit -m "chore: update state after community check"
+          git add state.json my-voice.json
+          git diff --staged --quiet || git commit -m "chore: update state and voice samples"
           git push
