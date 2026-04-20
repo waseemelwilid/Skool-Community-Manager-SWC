@@ -22,13 +22,14 @@ export class SkoolBot {
 
   async login(email, password) {
     console.log('Logging in to Skool...');
-    await this.page.goto(`${BASE_URL}/login`, { waitUntil: 'networkidle' });
+    await this.page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     await this.page.fill('input[type="email"], input[name="email"]', email);
     await this.page.fill('input[type="password"], input[name="password"]', password);
     await this.page.click('button[type="submit"]');
 
-    await this.page.waitForURL(url => !url.toString().includes('/login'), { timeout: 15000 });
+    await this.page.waitForTimeout(3000);
+    await this.page.waitForURL(url => !url.toString().includes('/login'), { timeout: 30000 });
     console.log('Logged in successfully.');
   }
 
