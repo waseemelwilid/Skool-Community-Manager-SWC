@@ -28,14 +28,17 @@ await page.waitForFunction(() => !window.location.href.includes('/login'), { tim
 console.log('Logged in. URL:', page.url());
 
 // Go to community feed
-await page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(3000);
+await page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'networkidle', timeout: 60000 });
+await page.waitForTimeout(5000);
 
-// Scroll down to load more posts
-for (let i = 0; i < 5; i++) {
-  await page.evaluate(() => window.scrollBy(0, 1500));
-  await page.waitForTimeout(1500);
+// Scroll down to trigger lazy-loaded posts
+for (let i = 0; i < 8; i++) {
+  await page.evaluate(() => window.scrollBy(0, 1200));
+  await page.waitForTimeout(2000);
 }
+
+console.log('Page URL after load:', page.url());
+console.log('Page title:', await page.title());
 
 // Collect all post links
 const postLinks = await page.evaluate(() => {
@@ -49,8 +52,11 @@ const postLinks = await page.evaluate(() => {
       results.push(`https://www.skool.com${href}`);
     }
   });
+  console.log('All links on page:', document.querySelectorAll('a').length);
   return results;
 });
+
+console.log('All post links found:', postLinks);
 
 console.log(`Found ${postLinks.length} posts to check for Dino's comments`);
 
