@@ -28,7 +28,7 @@ export class SkoolBot {
     await this.page.fill('input[type="password"], input[name="password"]', password);
     await this.page.click('button[type="submit"]');
 
-    await this.page.waitForURL(url => !url.includes('/login'), { timeout: 15000 });
+    await this.page.waitForURL(url => !url.toString().includes('/login'), { timeout: 15000 });
     console.log('Logged in successfully.');
   }
 
