@@ -12,61 +12,80 @@ export class SkoolBot {
   async init() {
     this.browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });
     const context = await this.browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 800 },
     });
     this.page = await context.newPage();
+    this.page.setDefaultTimeout(60000);
   }
 
   async login(email, password) {
     console.log('Logging in to Skool...');
     await this.page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(2000);
 
-    await this.page.fill('input[type="email"], input[name="email"]', email);
-    await this.page.fill('input[type="password"], input[name="password"]', password);
+    await this.page.fill('input[type="email"]', email);
+    await this.page.fill('input[type="password"]', password);
     await this.page.click('button[type="submit"]');
 
-    await this.page.waitForTimeout(3000);
-    await this.page.waitForURL(url => !url.toString().includes('/login'), { timeout: 30000 });
-    console.log('Logged in successfully.');
+    // Wait for redirect away from login page
+    await this.page.waitForFunction(
+      () => !window.location.href.includes('/login'),
+      { timeout: 30000 }
+    );
+    console.log('Logged in. Current URL:', this.page.url());
   }
 
   async getNewPosts(since) {
     console.log('Checking community feed...');
-    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'networkidle' });
-    await this.page.waitForTimeout(2000);
+    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(3000);
 
-    const posts = await this.page.evaluate((sinceDate) => {
+    const currentUrl = this.page.url();
+    console.log('Feed URL:', currentUrl);
+
+    const posts = await this.page.evaluate(() => {
       const results = [];
-      // Skool post cards — selectors may need adjusting after first run
-      const postEls = document.querySelectorAll('[data-testid="post-card"], .post-card, article[class*="post"]');
+      // Try multiple selector patterns for Skool post cards
+      const selectors = [
+        'a[href*="/p/"]',
+      ];
 
-      postEls.forEach(el => {
-        const idEl = el.querySelector('a[href*="/p/"]');
-        if (!idEl) return;
+      const links = document.querySelectorAll('a[href*="/p/"]');
+      const seen = new Set();
 
-        const href = idEl.getAttribute('href');
-        const postId = href.split('/p/')[1]?.split('/')[0];
-        if (!postId) return;
+      links.forEach(link => {
+        const href = link.getAttribute('href');
+        const match = href.match(/\/p\/([^/?#]+)/);
+        if (!match) return;
 
-        const timeEl = el.querySelector('time, [data-testid="post-time"], span[class*="time"]');
-        const postTime = timeEl?.getAttribute('datetime') || timeEl?.textContent;
+        const postId = match[1];
+        if (seen.has(postId)) return;
+        seen.add(postId);
 
-        const bodyEl = el.querySelector('[data-testid="post-body"], p, [class*="body"], [class*="content"]');
-        const body = bodyEl?.textContent?.trim();
-
-        const authorEl = el.querySelector('[data-testid="post-author"], [class*="author"], [class*="name"]');
-        const author = authorEl?.textContent?.trim();
-
-        if (body && postId) {
-          results.push({ id: postId, url: `https://www.skool.com${href}`, body, author, postTime });
+        // Walk up to find post container and get text
+        let el = link;
+        let text = '';
+        for (let i = 0; i < 5; i++) {
+          el = el.parentElement;
+          if (!el) break;
+          const t = el.innerText?.trim();
+          if (t && t.length > 20) { text = t.slice(0, 500); break; }
         }
+
+        results.push({
+          id: postId,
+          url: `https://www.skool.com${href}`,
+          body: text,
+          author: '',
+        });
       });
 
-      return results;
-    }, since);
+      return results.slice(0, 10); // max 10 posts per run
+    });
 
     console.log(`Found ${posts.length} posts on feed.`);
     return posts;
@@ -74,90 +93,139 @@ export class SkoolBot {
 
   async replyToPost(postUrl, reply) {
     console.log(`Replying to post: ${postUrl}`);
-    await this.page.goto(postUrl, { waitUntil: 'networkidle' });
-    await this.page.waitForTimeout(2000);
+    await this.page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(3000);
 
-    // Find and click the comment/reply box
-    const commentBox = await this.page.locator(
-      '[data-testid="comment-input"], [placeholder*="comment"], [placeholder*="reply"], [class*="comment"] textarea, [class*="comment"] [contenteditable]'
-    ).first();
+    // Try to find comment input
+    const commentSelectors = [
+      '[placeholder*="comment" i]',
+      '[placeholder*="write" i]',
+      '[placeholder*="reply" i]',
+      '[contenteditable="true"]',
+      'textarea',
+    ];
+
+    let commentBox = null;
+    for (const sel of commentSelectors) {
+      const el = this.page.locator(sel).first();
+      if (await el.count() > 0) {
+        commentBox = el;
+        break;
+      }
+    }
+
+    if (!commentBox) {
+      console.log('Could not find comment box, skipping post.');
+      return;
+    }
 
     await commentBox.click();
     await commentBox.fill(reply);
-    await this.page.waitForTimeout(500);
+    await this.page.waitForTimeout(1000);
 
-    // Submit
-    const submitBtn = await this.page.locator(
-      '[data-testid="submit-comment"], button:has-text("Post"), button:has-text("Reply"), button:has-text("Comment")'
-    ).first();
-    await submitBtn.click();
+    // Try to submit
+    const submitSelectors = [
+      'button:has-text("Post")',
+      'button:has-text("Reply")',
+      'button:has-text("Comment")',
+      'button[type="submit"]',
+    ];
+
+    for (const sel of submitSelectors) {
+      const btn = this.page.locator(sel).first();
+      if (await btn.count() > 0) {
+        await btn.click();
+        break;
+      }
+    }
+
     await this.page.waitForTimeout(2000);
-
     console.log('Reply posted.');
   }
 
-  async getUnreadDMs(since) {
+  async getUnreadDMs() {
     console.log('Checking DMs...');
-    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/inbox`, { waitUntil: 'networkidle' });
-    await this.page.waitForTimeout(2000);
 
-    // Try alternative inbox URL if above 404s
-    if (this.page.url().includes('404') || this.page.url().includes('not-found')) {
-      await this.page.goto(`${BASE_URL}/inbox`, { waitUntil: 'networkidle' });
+    // Try different inbox URLs
+    const inboxUrls = [
+      `${BASE_URL}/${COMMUNITY_SLUG}/inbox`,
+      `${BASE_URL}/inbox`,
+      `${BASE_URL}/${COMMUNITY_SLUG}/messages`,
+    ];
+
+    for (const url of inboxUrls) {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await this.page.waitForTimeout(2000);
+      const currentUrl = this.page.url();
+      console.log('Inbox URL tried:', currentUrl);
+      if (!currentUrl.includes('404') && !currentUrl.includes('not-found')) break;
     }
 
     const threads = await this.page.evaluate(() => {
       const results = [];
-      const threadEls = document.querySelectorAll(
-        '[data-testid="dm-thread"], [class*="thread"], [class*="message-row"], [class*="conversation"]'
-      );
+      const links = document.querySelectorAll('a[href*="inbox"], a[href*="message"], a[href*="dm"]');
 
-      threadEls.forEach(el => {
-        const linkEl = el.querySelector('a[href*="inbox"], a[href*="message"]');
-        const href = linkEl?.getAttribute('href');
-        const threadId = href?.split('/').pop();
-        const unreadBadge = el.querySelector('[class*="unread"], [class*="badge"], [data-unread]');
-        const preview = el.querySelector('[class*="preview"], [class*="last-message"], p')?.textContent?.trim();
-        const sender = el.querySelector('[class*="sender"], [class*="name"]')?.textContent?.trim();
-
-        if (threadId && (unreadBadge || preview)) {
-          results.push({ id: threadId, url: href ? `https://www.skool.com${href}` : null, preview, sender });
+      links.forEach(link => {
+        const href = link.getAttribute('href');
+        const threadId = href?.split('/').filter(Boolean).pop();
+        const text = link.innerText?.trim();
+        if (threadId && text) {
+          results.push({
+            id: threadId,
+            url: `https://www.skool.com${href}`,
+            preview: text.slice(0, 200),
+            sender: '',
+          });
         }
       });
 
-      return results;
+      return results.slice(0, 5); // max 5 DMs per run
     });
 
-    console.log(`Found ${threads.length} DM threads to check.`);
+    console.log(`Found ${threads.length} DM threads.`);
     return threads;
   }
 
   async getLastDMInThread(threadUrl) {
-    await this.page.goto(threadUrl, { waitUntil: 'networkidle' });
+    await this.page.goto(threadUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(2000);
 
     return await this.page.evaluate(() => {
-      const messages = document.querySelectorAll('[class*="message"], [data-testid="message"]');
-      const last = messages[messages.length - 1];
-      return last?.querySelector('p, [class*="body"], [class*="content"]')?.textContent?.trim();
+      const els = document.querySelectorAll('p, [class*="message"], [class*="body"]');
+      const texts = Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 5);
+      return texts[texts.length - 1] || '';
     });
   }
 
   async replyToDM(threadUrl, reply) {
     console.log(`Replying to DM: ${threadUrl}`);
-    await this.page.goto(threadUrl, { waitUntil: 'networkidle' });
+    await this.page.goto(threadUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(2000);
 
-    const inputBox = await this.page.locator(
-      '[data-testid="message-input"], [placeholder*="message"], [placeholder*="reply"], textarea[class*="input"], [contenteditable="true"]'
-    ).first();
+    const inputSelectors = [
+      '[placeholder*="message" i]',
+      '[placeholder*="reply" i]',
+      '[contenteditable="true"]',
+      'textarea',
+    ];
+
+    let inputBox = null;
+    for (const sel of inputSelectors) {
+      const el = this.page.locator(sel).first();
+      if (await el.count() > 0) {
+        inputBox = el;
+        break;
+      }
+    }
+
+    if (!inputBox) {
+      console.log('Could not find DM input, skipping.');
+      return;
+    }
 
     await inputBox.click();
     await inputBox.fill(reply);
     await this.page.waitForTimeout(500);
-
-    // Send via Enter or button
     await inputBox.press('Enter');
     await this.page.waitForTimeout(2000);
     console.log('DM reply sent.');

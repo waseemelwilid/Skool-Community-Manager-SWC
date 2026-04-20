@@ -42,7 +42,7 @@ async function run() {
     }
 
     // --- DMs ---
-    const threads = await bot.getUnreadDMs(state.lastChecked);
+    const threads = await bot.getUnreadDMs();
     let dmReplies = 0;
 
     for (const thread of threads) {

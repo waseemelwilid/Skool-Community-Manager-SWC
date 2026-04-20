@@ -1,6 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 const SYSTEM_PROMPT = `You are the AI community manager for The Selfwork Club on Skool.com — a $49/month community by Dino focused on communication, confidence, and personal transformation. You manage the community as an extension of Dino's brand.
 
@@ -39,20 +40,13 @@ NEVER:
 - "Amazing post! So inspiring!"
 - Generic encouragement
 - Lecture or preach
-- Write essays when a sentence will do
-- Speak for Dino personally`;
+- Write essays when a sentence will do`;
 
 export async function generateReply(content, type = 'post') {
   const userMessage = type === 'dm'
     ? `A member sent this DM: "${content}"\n\nWrite a reply.`
     : `A member posted this in the community: "${content}"\n\nWrite a reply.`;
 
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 300,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userMessage }],
-  });
-
-  return message.content[0].text.trim();
+  const result = await model.generateContent(`${SYSTEM_PROMPT}\n\n${userMessage}`);
+  return result.response.text().trim();
 }
