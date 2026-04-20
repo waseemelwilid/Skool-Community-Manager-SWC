@@ -5,12 +5,12 @@ const EMAIL = process.env.SKOOL_EMAIL;
 const PASSWORD = process.env.SKOOL_PASSWORD;
 const COMMUNITY_SLUG = 'selfworkacademy';
 const BASE_URL = 'https://www.skool.com';
+const MY_NAME = 'Ahmed Dino';
 
 const browser = await chromium.launch({
   headless: true,
   args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
 });
-
 const context = await browser.newContext({
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 });
@@ -27,18 +27,17 @@ await page.click('button[type="submit"]');
 await page.waitForFunction(() => !window.location.href.includes('/login'), { timeout: 30000 });
 console.log('Logged in. URL:', page.url());
 
-// Go to community
+// Go to community feed
 await page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(3000);
 
-// Get the logged-in user's name/identifier
-const myName = await page.evaluate(() => {
-  const nameEl = document.querySelector('[class*="profile"] [class*="name"], [class*="user"] [class*="name"], nav [class*="name"]');
-  return nameEl?.innerText?.trim() || '';
-});
-console.log('Logged in as:', myName);
+// Scroll down to load more posts
+for (let i = 0; i < 5; i++) {
+  await page.evaluate(() => window.scrollBy(0, 1500));
+  await page.waitForTimeout(1500);
+}
 
-// Collect all post links on the feed
+// Collect all post links
 const postLinks = await page.evaluate(() => {
   const links = document.querySelectorAll('a[href*="/p/"]');
   const seen = new Set();
@@ -50,63 +49,63 @@ const postLinks = await page.evaluate(() => {
       results.push(`https://www.skool.com${href}`);
     }
   });
-  return results.slice(0, 20);
+  return results;
 });
 
-console.log(`Found ${postLinks.length} posts to scrape`);
+console.log(`Found ${postLinks.length} posts to check for Dino's comments`);
 
-const myPosts = [];
-const myComments = [];
+const dinoComments = [];
 
 for (const postUrl of postLinks) {
-  await page.goto(postUrl, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2000);
+  try {
+    await page.goto(postUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
 
-  const data = await page.evaluate((name) => {
-    const result = { post: null, comments: [] };
+    // Scroll to load all comments
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => window.scrollBy(0, 1000));
+      await page.waitForTimeout(800);
+    }
 
-    // Try to find post author and body
-    const allTextBlocks = document.querySelectorAll('p, [class*="body"], [class*="content"]');
+    const comments = await page.evaluate((name) => {
+      const results = [];
+      // Look for any element containing the name
+      const allEls = document.querySelectorAll('*');
+      allEls.forEach(el => {
+        if (el.children.length > 0) return; // skip parent elements
+        const text = el.innerText?.trim();
+        if (text && text.includes(name)) {
+          // Found the name — get the comment body nearby
+          const container = el.closest('[class*="comment"], [class*="reply"], [class*="post"]');
+          if (container) {
+            const body = container.querySelector('p, [class*="body"], [class*="text"]');
+            const bodyText = body?.innerText?.trim();
+            if (bodyText && bodyText.length > 10 && !bodyText.includes(name)) {
+              results.push(bodyText);
+            }
+          }
+        }
+      });
+      return results;
+    }, MY_NAME);
 
-    // Find comments/replies
-    const commentEls = document.querySelectorAll('[class*="comment"], [class*="reply"]');
-    commentEls.forEach(el => {
-      const authorEl = el.querySelector('[class*="name"], [class*="author"]');
-      const bodyEl = el.querySelector('p, [class*="body"]');
-      const author = authorEl?.innerText?.trim();
-      const body = bodyEl?.innerText?.trim();
-
-      if (author && body && (name ? author.includes(name) : true)) {
-        result.comments.push({ author, body });
-      }
-    });
-
-    return result;
-  }, myName);
-
-  if (data.comments.length > 0) {
-    myComments.push(...data.comments.map(c => c.body));
+    if (comments.length > 0) {
+      console.log(`Found ${comments.length} Dino comment(s) on: ${postUrl}`);
+      dinoComments.push(...comments);
+    }
+  } catch (err) {
+    console.log(`Skipped ${postUrl}: ${err.message}`);
   }
 }
 
-// Also check DMs
-await page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/inbox`, { waitUntil: 'domcontentloaded' });
-await page.waitForTimeout(2000);
+console.log(`\nTotal Dino comments found: ${dinoComments.length}`);
 
-const dmTexts = await page.evaluate(() => {
-  const els = document.querySelectorAll('p, [class*="message"]');
-  return Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 10).slice(0, 30);
-});
-
-const voice = {
-  myName,
-  posts: myPosts,
-  comments: myComments.slice(0, 50),
-  dms: dmTexts.slice(0, 20),
+writeFileSync('my-voice.json', JSON.stringify({
+  name: MY_NAME,
+  comments: dinoComments,
+  count: dinoComments.length,
   scrapedAt: new Date().toISOString(),
-};
+}, null, 2));
 
-writeFileSync('my-voice.json', JSON.stringify(voice, null, 2));
-console.log(`Saved ${myComments.length} comments and ${dmTexts.length} DM messages to my-voice.json`);
-
+console.log('Saved to my-voice.json');
 await browser.close();
