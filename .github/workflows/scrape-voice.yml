@@ -22,6 +22,7 @@ jobs:
         run: |
           git config user.name "skool-bot"
           git config user.email "bot@selfworkclub.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/waseemelwilid/Skool-Community-Manager-SWC.git
           git add my-voice.json
           git diff --staged --quiet || git commit -m "chore: scrape voice samples"
           git push
