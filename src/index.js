@@ -1,6 +1,7 @@
 import { SkoolBot } from './skool.js';
 import { generateReply } from './claude.js';
 import { loadState, saveState, hasReplied, markReplied } from './state.js';
+import { shouldReplyToPost, shouldReplyToDM } from './filter.js';
 
 const EMAIL = process.env.SKOOL_EMAIL;
 const PASSWORD = process.env.SKOOL_PASSWORD;
@@ -27,17 +28,21 @@ async function run() {
         console.log(`Already replied to post ${post.id}, skipping.`);
         continue;
       }
-      if (!post.body || post.body.length < 10) continue;
 
-      console.log(`\nGenerating reply for post by ${post.author}:\n"${post.body.slice(0, 100)}..."`);
-      const reply = await generateReply(post.body, 'post');
-      console.log(`Reply: ${reply}`);
+      const { reply, reason } = shouldReplyToPost(post);
+      if (!reply) {
+        console.log(`Skipping post ${post.id}: ${reason}`);
+        continue;
+      }
 
-      await bot.replyToPost(post.url, reply);
+      console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}..."`);
+      const response = await generateReply(post.body, 'post');
+      console.log(`Reply: ${response}`);
+
+      await bot.replyToPost(post.url, response);
       markReplied(state, post.id, 'post');
       postReplies++;
 
-      // Pause between replies to avoid looking like a bot
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
     }
 
@@ -53,20 +58,24 @@ async function run() {
       }
 
       const lastMessage = await bot.getLastDMInThread(thread.url);
-      if (!lastMessage || lastMessage.length < 5) continue;
+      const { reply, reason } = shouldReplyToDM(lastMessage, thread.sender);
 
-      console.log(`\nGenerating DM reply for ${thread.sender}:\n"${lastMessage.slice(0, 100)}..."`);
-      const reply = await generateReply(lastMessage, 'dm');
-      console.log(`Reply: ${reply}`);
+      if (!reply) {
+        console.log(`Skipping DM ${thread.id}: ${reason}`);
+        continue;
+      }
 
-      await bot.replyToDM(thread.url, reply);
+      console.log(`\nReplying to DM (${reason}) from ${thread.sender}:\n"${lastMessage.slice(0, 100)}..."`);
+      const response = await generateReply(lastMessage, 'dm');
+      console.log(`Reply: ${response}`);
+
+      await bot.replyToDM(thread.url, response);
       markReplied(state, thread.id, 'dm');
       dmReplies++;
 
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
     }
 
-    // Update last checked timestamp
     state.lastChecked = new Date().toISOString();
     saveState(state);
 
