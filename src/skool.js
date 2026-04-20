@@ -49,11 +49,6 @@ export class SkoolBot {
 
     const posts = await this.page.evaluate(() => {
       const results = [];
-      // Try multiple selector patterns for Skool post cards
-      const selectors = [
-        'a[href*="/p/"]',
-      ];
-
       const links = document.querySelectorAll('a[href*="/p/"]');
       const seen = new Set();
 
@@ -66,25 +61,38 @@ export class SkoolBot {
         if (seen.has(postId)) return;
         seen.add(postId);
 
-        // Walk up to find post container and get text
+        // Walk up to find post container
         let el = link;
         let text = '';
-        for (let i = 0; i < 5; i++) {
+        let author = '';
+        for (let i = 0; i < 6; i++) {
           el = el.parentElement;
           if (!el) break;
           const t = el.innerText?.trim();
           if (t && t.length > 20) { text = t.slice(0, 500); break; }
         }
 
+        // Check if Ahmed Dino already commented
+        const fullText = el?.innerText || '';
+        const dinoAlreadyCommented = fullText.includes('Ahmed Dino');
+
+        // Get the latest reply text (last comment in the thread preview)
+        const commentEls = el?.querySelectorAll('[class*="comment"], [class*="reply"]');
+        const latestReply = commentEls?.length
+          ? commentEls[commentEls.length - 1]?.innerText?.trim()
+          : '';
+
         results.push({
           id: postId,
           url: `https://www.skool.com${href}`,
           body: text,
-          author: '',
+          author,
+          dinoAlreadyCommented,
+          latestReply,
         });
       });
 
-      return results.slice(0, 10); // max 10 posts per run
+      return results.slice(0, 15);
     });
 
     console.log(`Found ${posts.length} posts on feed.`);

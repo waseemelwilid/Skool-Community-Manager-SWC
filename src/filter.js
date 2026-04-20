@@ -1,53 +1,81 @@
 const QUESTION_WORDS = ['?', 'how', 'why', 'what', 'when', 'anyone', 'help', 'advice', 'thoughts', 'should i', 'do i', 'can i'];
-const STRUGGLE_WORDS = ['struggling', 'stuck', 'can\'t', 'can not', 'failing', 'failed', 'hard', 'difficult', 'lost', 'confused', 'anxiety', 'scared', 'afraid', 'overthinking', 'stressed', 'burnt out', 'burnout', 'feel like', 'feeling', 'honest', 'real talk', 'keep', 'always', 'never'];
+const STRUGGLE_WORDS = ['struggling', 'stuck', "can't", 'failing', 'failed', 'hard', 'difficult', 'lost', 'confused', 'anxiety', 'scared', 'afraid', 'overthinking', 'stressed', 'burnt out', 'burnout', 'feel like', 'feeling', 'honest', 'real talk', 'keep', 'always', 'never'];
 const WIN_WORDS = ['finally', 'did it', 'proud', 'achieved', 'managed', 'breakthrough', 'progress', 'growth', 'worked', 'won', 'succeeded'];
 const SKIP_WORDS = ['check out', 'link', 'http', 'announcement', 'reminder', 'just sharing', 'fyi'];
 const MAX_POST_AGE_HOURS = 48;
 
-export function shouldReplyToPost(post, dinoName = 'Ahmed Dino') {
+// Dead reply = short factual answer with no depth, no question, no emotion
+// e.g. "Coventry for my university block." or "Yeah" or "Thanks!"
+function isDeadReply(text) {
+  if (!text) return true;
+  const t = text.trim();
+  if (t.length < 40) return true; // too short to build on
+  if (t.split(' ').length < 6) return true; // fewer than 6 words
+  const hasDepth = STRUGGLE_WORDS.some(w => t.toLowerCase().includes(w))
+    || QUESTION_WORDS.some(w => t.toLowerCase().includes(w))
+    || WIN_WORDS.some(w => t.toLowerCase().includes(w))
+    || t.length > 100;
+  return !hasDepth;
+}
+
+export function shouldReplyToPost(post) {
   const body = (post.body || '').toLowerCase();
   const author = (post.author || '').toLowerCase();
 
   // Never reply to Dino's own posts
-  if (author.includes('ahmed') || author.includes('dino')) return { reply: false, reason: 'own post' };
+  if (author.includes('ahmed') || author.includes('dino')) {
+    return { reply: false, reason: 'own post' };
+  }
 
   // Skip if post is too old
   if (post.postTime) {
     const postDate = new Date(post.postTime);
     if (!isNaN(postDate)) {
       const hoursAgo = (Date.now() - postDate.getTime()) / (1000 * 60 * 60);
-      if (hoursAgo > MAX_POST_AGE_HOURS) return { reply: false, reason: `too old (${Math.round(hoursAgo)}h)` };
+      if (hoursAgo > MAX_POST_AGE_HOURS) {
+        return { reply: false, reason: `too old (${Math.round(hoursAgo)}h)` };
+      }
     }
   }
 
   // Skip announcements/link shares
-  if (SKIP_WORDS.some(w => body.includes(w))) return { reply: false, reason: 'announcement/link' };
+  if (SKIP_WORDS.some(w => body.includes(w))) {
+    return { reply: false, reason: 'announcement/link' };
+  }
 
-  // Skip very short posts (likely just an image or emoji)
+  // Skip very short posts
   if (body.length < 20) return { reply: false, reason: 'too short' };
 
-  // Reply to questions
+  // If Dino already commented, only continue if the latest reply is substantive
+  if (post.dinoAlreadyCommented) {
+    if (!post.latestReply || isDeadReply(post.latestReply)) {
+      return { reply: false, reason: 'dead convo after Dino comment' };
+    }
+    // Latest reply has depth — worth continuing
+    return { reply: true, reason: 'substantive follow-up after Dino comment' };
+  }
+
+  // Fresh post Dino hasn't touched — reply if engaging
   if (QUESTION_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'question' };
-
-  // Reply to struggles
   if (STRUGGLE_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'struggle' };
-
-  // Reply to wins
   if (WIN_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'win' };
-
-  // Reply to longer thoughtful posts (likely a real share)
   if (body.length > 150) return { reply: true, reason: 'substantive post' };
 
   return { reply: false, reason: 'not engaging enough' };
 }
 
-export function shouldReplyToDM(lastMessage, lastSender, dinoName = 'Ahmed Dino') {
+export function shouldReplyToDM(lastMessage, lastSender) {
   if (!lastMessage || lastMessage.length < 5) return { reply: false, reason: 'empty message' };
 
-  // Don't reply if Dino sent the last message
   const sender = (lastSender || '').toLowerCase();
-  if (sender.includes('ahmed') || sender.includes('dino')) return { reply: false, reason: 'dino sent last' };
+  if (sender.includes('ahmed') || sender.includes('dino')) {
+    return { reply: false, reason: 'dino sent last' };
+  }
 
-  // Don't reply to very old threads (handled by state)
+  // Dead reply in DM — short factual answer, nowhere to go
+  if (isDeadReply(lastMessage)) {
+    return { reply: false, reason: 'dead conversation' };
+  }
+
   return { reply: true, reason: 'unread from member' };
 }
