@@ -34,7 +34,7 @@ export class SkoolBot {
     // Wait for redirect away from login page
     await this.page.waitForFunction(
       () => !window.location.href.includes('/login'),
-      { timeout: 30000 }
+      { timeout: 60000 }
     );
     console.log('Logged in. Current URL:', this.page.url());
   }
@@ -42,7 +42,20 @@ export class SkoolBot {
   async getNewPosts(since) {
     console.log('Checking community feed...');
     await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    // Wait for React to render posts — wait for actual post links to appear
+    try {
+      await this.page.waitForSelector('a[href*="/p/"]', { timeout: 15000 });
+    } catch {
+      console.log('Post links not found after 15s, proceeding anyway...');
+    }
     await this.page.waitForTimeout(3000);
+
+    // Scroll to trigger lazy-loaded posts
+    for (let i = 0; i < 5; i++) {
+      await this.page.evaluate(() => window.scrollBy(0, 1000));
+      await this.page.waitForTimeout(1000);
+    }
 
     const currentUrl = this.page.url();
     console.log('Feed URL:', currentUrl);
@@ -82,11 +95,19 @@ export class SkoolBot {
           ? commentEls[commentEls.length - 1]?.innerText?.trim()
           : '';
 
+        // Try to extract author name and profile link
+        const authorLink = el?.querySelector('a[href*="/u/"], a[href*="/@"]');
+        const authorProfile = authorLink
+          ? `https://www.skool.com${authorLink.getAttribute('href')}`
+          : null;
+        const authorName = authorLink?.innerText?.trim() || '';
+
         results.push({
           id: postId,
           url: `https://www.skool.com${href}`,
           body: text,
-          author,
+          author: authorName || author,
+          authorProfile,
           dinoAlreadyCommented,
           latestReply,
         });
@@ -154,40 +175,57 @@ export class SkoolBot {
   async getUnreadDMs() {
     console.log('Checking DMs...');
 
-    // Try different inbox URLs
-    const inboxUrls = [
-      `${BASE_URL}/${COMMUNITY_SLUG}/inbox`,
-      `${BASE_URL}/inbox`,
-      `${BASE_URL}/${COMMUNITY_SLUG}/messages`,
-    ];
+    // Skool DMs are at the top-level /inbox (not community-scoped)
+    await this.page.goto(`${BASE_URL}/inbox`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    for (const url of inboxUrls) {
-      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await this.page.waitForTimeout(2000);
-      const currentUrl = this.page.url();
-      console.log('Inbox URL tried:', currentUrl);
-      if (!currentUrl.includes('404') && !currentUrl.includes('not-found')) break;
+    // Wait for DM threads to render
+    try {
+      await this.page.waitForSelector('a[href*="/inbox/"]', { timeout: 10000 });
+    } catch {
+      console.log('No DM thread links found, trying alternate selector...');
     }
+    await this.page.waitForTimeout(3000);
+
+    const currentUrl = this.page.url();
+    console.log('Inbox URL:', currentUrl);
+
+    // Log raw page structure for debugging
+    const rawLinks = await this.page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a')).map(a => a.getAttribute('href')).filter(Boolean).slice(0, 30);
+    });
+    console.log('All links on inbox page:', JSON.stringify(rawLinks));
 
     const threads = await this.page.evaluate(() => {
       const results = [];
-      const links = document.querySelectorAll('a[href*="inbox"], a[href*="message"], a[href*="dm"]');
+      // Try multiple patterns Skool might use for DM thread links
+      const selectors = [
+        'a[href*="/inbox/"]',
+        'a[href*="/messages/"]',
+        'a[href*="/chat/"]',
+        'a[href*="/dm/"]',
+      ];
 
-      links.forEach(link => {
-        const href = link.getAttribute('href');
-        const threadId = href?.split('/').filter(Boolean).pop();
-        const text = link.innerText?.trim();
-        if (threadId && text) {
+      const seen = new Set();
+      for (const sel of selectors) {
+        document.querySelectorAll(sel).forEach(link => {
+          const href = link.getAttribute('href');
+          if (!href || seen.has(href)) return;
+          seen.add(href);
+          const threadId = href.split('/').filter(Boolean).pop();
+          const text = link.innerText?.trim();
+          // Try to extract sender name from link text or nearby element
+          const senderEl = link.querySelector('[class*="name"], [class*="user"], strong, b') ||
+            link.closest('[class*="thread"], [class*="conversation"]')?.querySelector('[class*="name"], strong');
+          const sender = senderEl?.innerText?.trim() || '';
           results.push({
             id: threadId,
             url: `https://www.skool.com${href}`,
-            preview: text.slice(0, 200),
-            sender: '',
+            preview: text?.slice(0, 200) || '',
+            sender,
           });
-        }
-      });
-
-      return results.slice(0, 5); // max 5 DMs per run
+        });
+      }
+      return results.slice(0, 5);
     });
 
     console.log(`Found ${threads.length} DM threads.`);
@@ -237,6 +275,58 @@ export class SkoolBot {
     await inputBox.press('Enter');
     await this.page.waitForTimeout(2000);
     console.log('DM reply sent.');
+  }
+
+  async sendNewDM(profileUrl, message) {
+    console.log(`Sending re-engagement DM via profile: ${profileUrl}`);
+    await this.page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(2000);
+
+    const msgSelectors = [
+      'button:has-text("Message")',
+      'button:has-text("DM")',
+      'a:has-text("Message")',
+      '[aria-label*="message" i]',
+    ];
+
+    let msgBtn = null;
+    for (const sel of msgSelectors) {
+      const el = this.page.locator(sel).first();
+      if (await el.count() > 0) { msgBtn = el; break; }
+    }
+
+    if (!msgBtn) {
+      console.log('Could not find Message button on profile, skipping.');
+      return false;
+    }
+
+    await msgBtn.click();
+    await this.page.waitForTimeout(2000);
+
+    const inputSelectors = [
+      '[placeholder*="message" i]',
+      '[contenteditable="true"]',
+      'textarea',
+    ];
+
+    let inputBox = null;
+    for (const sel of inputSelectors) {
+      const el = this.page.locator(sel).first();
+      if (await el.count() > 0) { inputBox = el; break; }
+    }
+
+    if (!inputBox) {
+      console.log('Could not find DM compose box, skipping.');
+      return false;
+    }
+
+    await inputBox.click();
+    await inputBox.fill(message);
+    await this.page.waitForTimeout(500);
+    await inputBox.press('Enter');
+    await this.page.waitForTimeout(2000);
+    console.log('Re-engagement DM sent.');
+    return true;
   }
 
   async close() {

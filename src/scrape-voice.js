@@ -24,12 +24,12 @@ await page.waitForTimeout(2000);
 await page.fill('input[type="email"]', EMAIL);
 await page.fill('input[type="password"]', PASSWORD);
 await page.click('button[type="submit"]');
-await page.waitForFunction(() => !window.location.href.includes('/login'), { timeout: 30000 });
+await page.waitForFunction(() => !window.location.href.includes('/login'), { timeout: 60000 });
 console.log('Logged in. URL:', page.url());
 
 // Go to community feed
-await page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'networkidle', timeout: 60000 });
-await page.waitForTimeout(5000);
+await page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForTimeout(6000);
 
 // Scroll down to trigger lazy-loaded posts
 for (let i = 0; i < 8; i++) {

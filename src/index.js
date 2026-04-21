@@ -1,6 +1,6 @@
 import { SkoolBot } from './skool.js';
-import { generateReply } from './claude.js';
-import { loadState, saveState, hasReplied, markReplied } from './state.js';
+import { generateReply, generateReengagementDM } from './claude.js';
+import { loadState, saveState, hasReplied, markReplied, updateMemberSeen, getInactiveMembers, markReengagementSent } from './state.js';
 import { shouldReplyToPost, shouldReplyToDM } from './filter.js';
 
 const EMAIL = process.env.SKOOL_EMAIL;
@@ -36,7 +36,7 @@ async function run() {
       }
 
       console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}..."`);
-      const response = await generateReply(post.body, 'post');
+      const response = await generateReply(post.body, 'post', post.author);
       console.log(`Reply: ${response}`);
 
       await bot.replyToPost(post.url, response);
@@ -44,6 +44,11 @@ async function run() {
       postReplies++;
 
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+    }
+
+    // Track member activity from all posts (seen = active)
+    for (const post of posts) {
+      if (post.author) updateMemberSeen(state, post.author, post.authorProfile);
     }
 
     // --- DMs ---
@@ -76,10 +81,30 @@ async function run() {
       await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
     }
 
+    // --- RE-ENGAGEMENT DMs ---
+    const inactiveMembers = getInactiveMembers(state);
+    let reengagementCount = 0;
+
+    for (const member of inactiveMembers.slice(0, 3)) { // max 3 per run
+      console.log(`\nSending re-engagement DM to ${member.name} (inactive 7+ days)`);
+      try {
+        const msg = await generateReengagementDM(member.name);
+        console.log(`Re-engagement message: ${msg}`);
+        const sent = await bot.sendNewDM(member.profileUrl, msg);
+        if (sent) {
+          markReengagementSent(state, member.name);
+          reengagementCount++;
+          await new Promise(r => setTimeout(r, 5000 + Math.random() * 3000));
+        }
+      } catch (err) {
+        console.log(`Re-engagement DM failed for ${member.name}: ${err.message}`);
+      }
+    }
+
     state.lastChecked = new Date().toISOString();
     saveState(state);
 
-    console.log(`\nDone. Replied to ${postReplies} posts and ${dmReplies} DMs.`);
+    console.log(`\nDone. Replied to ${postReplies} posts, ${dmReplies} DMs, sent ${reengagementCount} re-engagement DMs.`);
 
   } catch (err) {
     console.error('Error during run:', err);

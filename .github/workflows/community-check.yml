@@ -24,6 +24,7 @@ jobs:
       - run: npx playwright install chromium --with-deps
 
       - name: Scrape Dino's comments to learn voice
+        continue-on-error: true
         env:
           SKOOL_EMAIL: ${{ secrets.SKOOL_EMAIL }}
           SKOOL_PASSWORD: ${{ secrets.SKOOL_PASSWORD }}
