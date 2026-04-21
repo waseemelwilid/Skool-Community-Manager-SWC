@@ -52,6 +52,23 @@ TONE RULES:
 FORMULA for deeper posts only:
 Name what's happening → sharp truth or reframe → one short question.`;
 
+async function callWithRetry(fn, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('Too Many');
+      if (is429 && i < retries - 1) {
+        const wait = 60000; // wait 60s on rate limit
+        console.log(`Rate limited by Gemini. Waiting 60s before retry ${i + 1}...`);
+        await new Promise(r => setTimeout(r, wait));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 export async function generateReply(content, type = 'post', authorName = '') {
   const voiceSamples = loadVoiceSamples();
   const nameHint = authorName ? ` The member's name is ${authorName}.` : '';
@@ -59,18 +76,20 @@ export async function generateReply(content, type = 'post', authorName = '') {
     ? `A member sent this DM: "${content}"${nameHint}\n\nWrite a reply. Match the depth — short message = short reply.`
     : `A member posted this in the community: "${content}"${nameHint}\n\nWrite a reply. If it's a simple check-in or accountability post, keep it to one short sentence or less. Only go deeper if they shared something with real emotion or a question.`;
 
-  const result = await model.generateContent(`${SYSTEM_PROMPT}${voiceSamples}\n\n${userMessage}`);
+  const result = await callWithRetry(() =>
+    model.generateContent(`${SYSTEM_PROMPT}${voiceSamples}\n\n${userMessage}`)
+  );
   return result.response.text().trim();
 }
 
 export async function generateReengagementDM(memberName) {
-  const result = await model.generateContent(`${SYSTEM_PROMPT}
+  const result = await callWithRetry(() => model.generateContent(`${SYSTEM_PROMPT}
 
 Generate a short re-engagement DM from Dino to a community member named ${memberName} who hasn't posted or been active in over a week.
 - 1-2 sentences max.
 - Warm but brief. Just checking in. Not needy.
 - Dino style: direct, no fluff.
 - Don't be cringe. Don't say "I noticed you've been quiet."
-- Examples of good check-ins: "Just checking in. Where are you at?" / "You good?" / "What's going on with you lately?"`);
+- Examples of good check-ins: "Just checking in. Where are you at?" / "You good?" / "What's going on with you lately?"`));
   return result.response.text().trim();
 }

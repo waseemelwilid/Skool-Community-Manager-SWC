@@ -23,7 +23,7 @@ async function run() {
     const posts = await bot.getNewPosts(state.lastChecked);
     let postReplies = 0;
 
-    for (const post of posts) {
+    for (const post of posts.slice(0, 5)) { // max 5 per run to avoid rate limits
       if (hasReplied(state, post.id)) {
         console.log(`Already replied to post ${post.id}, skipping.`);
         continue;
