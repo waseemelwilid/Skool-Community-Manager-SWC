@@ -35,15 +35,21 @@ async function run() {
         continue;
       }
 
+      console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}"`);
+      let response;
       try {
-        console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}..."`);
-        const response = await generateReply(post.body, 'post', post.author);
-        console.log(`Reply: ${response}`);
+        response = await generateReply(post.body, 'post', post.author);
+        console.log(`Generated reply: ${response}`);
+      } catch (err) {
+        console.log(`Claude API error: ${err.message}`);
+        continue;
+      }
+      try {
         await bot.replyToPost(post.url, response);
         markReplied(state, post.id, 'post');
         postReplies++;
       } catch (err) {
-        console.log(`Failed to reply to post ${post.id}: ${err.message}`);
+        console.log(`Failed to post reply: ${err.message}`);
       }
 
       await new Promise(r => setTimeout(r, 8000 + Math.random() * 4000));

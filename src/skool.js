@@ -156,22 +156,38 @@ export class SkoolBot {
     }
 
     await commentBox.click();
-    await commentBox.fill(reply);
+    await this.page.waitForTimeout(500);
+    // Use type() instead of fill() for contenteditable elements
+    await commentBox.type(reply, { delay: 30 });
     await this.page.waitForTimeout(1000);
 
+    // Try clicking submit button first
+    let submitted = false;
     const submitSelectors = [
       'button:has-text("Post")',
       'button:has-text("Reply")',
       'button:has-text("Comment")',
+      'button:has-text("Send")',
       'button[type="submit"]',
     ];
 
     for (const sel of submitSelectors) {
       const btn = this.page.locator(sel).first();
-      if (await btn.count() > 0) { await btn.click(); break; }
+      if (await btn.count() > 0) {
+        await btn.click();
+        submitted = true;
+        console.log(`Submitted via: ${sel}`);
+        break;
+      }
     }
 
-    await this.page.waitForTimeout(2000);
+    // Fallback: Ctrl+Enter or Enter
+    if (!submitted) {
+      await commentBox.press('Control+Enter');
+      console.log('Submitted via Ctrl+Enter');
+    }
+
+    await this.page.waitForTimeout(3000);
     console.log('Reply posted.');
   }
 
