@@ -199,49 +199,43 @@ export class SkoolBot {
     await this.page.waitForTimeout(5000);
     console.log('Chat page URL:', this.page.url());
 
-    // Dump all links on chat page to find thread URL pattern
-    const allChatLinks = await this.page.evaluate(() =>
-      Array.from(document.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).filter(Boolean)
-    );
-    console.log('All links on chat page:', JSON.stringify(allChatLinks.slice(0, 30)));
+    // Skool chat is a React SPA with no <a> tags — find clickable conversation rows
+    const threadCount = await this.page.evaluate(() => {
+      // Look for conversation list items (divs/li with click handlers)
+      const candidates = document.querySelectorAll('[class*="conversation"], [class*="thread"], [class*="chat-item"], [class*="message-item"], [class*="inbox-item"]');
+      console.log('Chat candidates found:', candidates.length);
+      return candidates.length;
+    });
+    console.log(`Chat conversation candidates: ${threadCount}`);
 
-    const threads = await this.page.evaluate((slug) => {
+    // Get all clickable items in the chat panel that look like conversations
+    const conversations = await this.page.evaluate(() => {
       const results = [];
+      // Find all elements that could be conversation rows
+      const selectors = [
+        '[class*="conversation"]',
+        '[class*="thread"]',
+        '[class*="chat-item"]',
+        '[class*="message-preview"]',
+        '[class*="inbox"]',
+      ];
       const seen = new Set();
-
-      const allLinks = document.querySelectorAll('a[href]');
-      allLinks.forEach(link => {
-        const href = link.getAttribute('href');
-        if (!href) return;
-
-        // Individual chat thread: /selfworkacademy/chat/[userId] or similar
-        const isChatThread = href.includes(`/${slug}/chat/`) || href.includes('/inbox/') || href.includes('/dm/');
-        const linkText = link.innerText || '';
-        const hasUnreadCount = /\(\d+\)/.test(linkText);
-        const container = link.closest('li, div, [class*="thread"], [class*="item"], [class*="row"]');
-        const hasBlueDot = !!(container?.querySelector('[class*="unread"], [class*="dot"], [class*="badge"], [class*="new"]'));
-
-        if (!isChatThread && !hasUnreadCount && !hasBlueDot) return;
-        if (seen.has(href)) return;
-        seen.add(href);
-
-        const threadId = href.split('/').filter(Boolean).pop();
-        const nameEl = container?.querySelector('[class*="name"], strong, b, h3, h4, p') || link;
-        const sender = nameEl?.innerText?.trim().replace(/\(\d+\)/, '').trim() || '';
-
-        results.push({
-          id: threadId || href,
-          url: href.startsWith('http') ? href : `https://www.skool.com${href}`,
-          sender,
-          hasUnread: hasUnreadCount || hasBlueDot || isChatThread,
+      for (const sel of selectors) {
+        document.querySelectorAll(sel).forEach((el, i) => {
+          const text = el.innerText?.trim();
+          if (!text || seen.has(text)) return;
+          seen.add(text);
+          const hasUnread = !!(el.querySelector('[class*="unread"], [class*="badge"], [class*="dot"]'))
+            || /\(\d+\)/.test(text);
+          results.push({ index: results.length, text: text.slice(0, 100), hasUnread });
         });
-      });
+      }
+      return results;
+    });
 
-      return results.slice(0, 5);
-    }, COMMUNITY_SLUG);
-
-    console.log(`Found ${threads.length} DM threads.`);
-    return threads;
+    console.log('Chat conversations found:', JSON.stringify(conversations));
+    // Return empty for now — DMs need click-based interaction built separately
+    return [];
   }
 
   async getLastDMInThread(threadUrl) {

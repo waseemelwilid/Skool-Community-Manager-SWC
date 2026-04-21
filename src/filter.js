@@ -1,88 +1,59 @@
-const QUESTION_WORDS = ['?', 'how', 'why', 'what', 'when', 'anyone', 'help', 'advice', 'thoughts', 'should i', 'do i', 'can i'];
-const STRUGGLE_WORDS = ['struggling', 'stuck', "can't", 'failing', 'failed', 'hard', 'difficult', 'lost', 'confused', 'anxiety', 'scared', 'afraid', 'overthinking', 'stressed', 'burnt out', 'burnout', 'feel like', 'feeling', 'honest', 'real talk', 'keep', 'always', 'never'];
-const WIN_WORDS = ['finally', 'did it', 'proud', 'achieved', 'managed', 'breakthrough', 'progress', 'growth', 'worked', 'won', 'succeeded'];
-const SKIP_WORDS = ['check out', 'link', 'http', 'announcement', 'reminder', 'just sharing', 'fyi'];
-const MAX_POST_AGE_HOURS = 48;
-
-// Dead reply = short factual answer with no depth, no question, no emotion
-// e.g. "Coventry for my university block." or "Yeah" or "Thanks!"
-function isDeadReply(text) {
-  if (!text) return true;
-  const t = text.trim();
-  if (t.length < 40) return true; // too short to build on
-  if (t.split(' ').length < 6) return true; // fewer than 6 words
-  const hasDepth = STRUGGLE_WORDS.some(w => t.toLowerCase().includes(w))
-    || QUESTION_WORDS.some(w => t.toLowerCase().includes(w))
-    || WIN_WORDS.some(w => t.toLowerCase().includes(w))
-    || t.length > 100;
-  return !hasDepth;
-}
+// Skip posts with these patterns
+const SKIP_PATTERNS = ['new leaderboard', 'new members start here', 'announcement', 'check out', 'http'];
 
 export function shouldReplyToPost(post) {
-  const body = (post.body || '').toLowerCase();
-  const author = (post.author || '').toLowerCase();
+  const body = post.body || '';
+  const bodyLower = body.toLowerCase();
 
   // Never reply to Dino's own posts
+  // Author field is unreliable (extracts like-count "6") — check body text instead
+  const author = (post.author || '').toLowerCase();
   if (author.includes('ahmed') || author.includes('dino')) {
-    return { reply: false, reason: 'own post' };
+    return { reply: false, reason: 'own post (author field)' };
+  }
+  // Also check if "Ahmed Dino" appears as the post author in the body (first 120 chars)
+  if (body.slice(0, 120).includes('Ahmed Dino')) {
+    return { reply: false, reason: 'own post (body check)' };
   }
 
-  // Skip if post is too old
-  if (post.postTime) {
-    const postDate = new Date(post.postTime);
-    if (!isNaN(postDate)) {
-      const hoursAgo = (Date.now() - postDate.getTime()) / (1000 * 60 * 60);
-      if (hoursAgo > MAX_POST_AGE_HOURS) {
-        return { reply: false, reason: `too old (${Math.round(hoursAgo)}h)` };
-      }
-    }
+  // Skip announcements
+  if (SKIP_PATTERNS.some(p => bodyLower.includes(p))) {
+    return { reply: false, reason: 'announcement/skip pattern' };
   }
 
-  // Skip announcements/link shares
-  if (SKIP_WORDS.some(w => body.includes(w))) {
-    return { reply: false, reason: 'announcement/link' };
+  // Skip posts older than 2 days — detect from body text ("9d •", "2w •", "Feb ", "Jan " etc.)
+  const ageMatch = body.match(/\b(\d+)([dwm])\s*[•·]/);
+  if (ageMatch) {
+    const num = parseInt(ageMatch[1]);
+    const unit = ageMatch[2];
+    if (unit === 'w' || unit === 'm') return { reply: false, reason: 'too old (weeks/months)' };
+    if (unit === 'd' && num > 2) return { reply: false, reason: `too old (${num}d)` };
+  }
+  // Skip if body contains month names (old post shown as date)
+  if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d/.test(body)) {
+    return { reply: false, reason: 'too old (date shown)' };
   }
 
   // Skip very short posts
-  if (body.length < 20) return { reply: false, reason: 'too short' };
+  if (body.length < 30) return { reply: false, reason: 'too short' };
 
-  // If Dino already commented, only continue if the latest reply is substantive
+  // Already replied — continue if latest reply has depth
   if (post.dinoAlreadyCommented) {
-    if (!post.latestReply || isDeadReply(post.latestReply)) {
-      return { reply: false, reason: 'dead convo after Dino comment' };
-    }
-    // Latest reply has depth — worth continuing
-    return { reply: true, reason: 'substantive follow-up after Dino comment' };
+    const latest = post.latestReply || '';
+    if (!latest || latest.length < 30) return { reply: false, reason: 'dead convo' };
+    return { reply: true, reason: 'follow-up' };
   }
 
-  // Fresh post Dino hasn't touched — prioritise unread dots and new comment flags
-  if (post.hasUnreadDot || post.hasNewComment) {
-    if (QUESTION_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'unread question' };
-    if (STRUGGLE_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'unread struggle' };
-    if (WIN_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'unread win' };
-    if (body.length > 80) return { reply: true, reason: 'unread post' };
-  }
-
-  if (QUESTION_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'question' };
-  if (STRUGGLE_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'struggle' };
-  if (WIN_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'win' };
-  if (body.length > 150) return { reply: true, reason: 'substantive post' };
-
-  return { reply: false, reason: 'not engaging enough' };
+  // Reply to anything recent — the bot's job is to engage
+  return { reply: true, reason: 'recent post' };
 }
 
 export function shouldReplyToDM(lastMessage, lastSender) {
-  if (!lastMessage || lastMessage.length < 5) return { reply: false, reason: 'empty message' };
-
+  if (!lastMessage || lastMessage.length < 5) return { reply: false, reason: 'empty' };
   const sender = (lastSender || '').toLowerCase();
   if (sender.includes('ahmed') || sender.includes('dino')) {
     return { reply: false, reason: 'dino sent last' };
   }
-
-  // Dead reply in DM — short factual answer, nowhere to go
-  if (isDeadReply(lastMessage)) {
-    return { reply: false, reason: 'dead conversation' };
-  }
-
-  return { reply: true, reason: 'unread from member' };
+  if (lastMessage.length < 15) return { reply: false, reason: 'dead reply' };
+  return { reply: true, reason: 'member message' };
 }
