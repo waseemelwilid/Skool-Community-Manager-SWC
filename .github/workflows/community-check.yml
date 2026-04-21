@@ -2,10 +2,10 @@ name: Skool Community Check
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # 8am UTC
-    - cron: '0 12 * * *'  # 12pm UTC
-    - cron: '0 17 * * *'  # 5pm UTC
-    - cron: '0 21 * * *'  # 9pm UTC
+    - cron: '0 8 * * *'   # 9am UK
+    - cron: '0 12 * * *'  # 1pm UK
+    - cron: '0 19 * * *'  # 8pm UK
+    - cron: '0 21 * * *'  # 10pm UK
   workflow_dispatch:
 
 permissions:
