@@ -76,26 +76,35 @@ export class SkoolBot {
 
         // Walk up to find post container
         let el = link;
-        let text = '';
-        let author = '';
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < 8; i++) {
           el = el.parentElement;
           if (!el) break;
           const t = el.innerText?.trim();
-          if (t && t.length > 20) { text = t.slice(0, 500); break; }
+          if (t && t.length > 20) break;
         }
 
-        // Check if Ahmed Dino already commented
         const fullText = el?.innerText || '';
+        const text = fullText.slice(0, 600);
+
+        // Blue dot = unread indicator
+        const hasUnreadDot = !!(
+          el?.querySelector('[class*="unread"], [class*="dot"], [class*="badge"], [class*="indicator"]') ||
+          el?.querySelector('circle, [style*="background: rgb(59"], [style*="background:#"], [style*="background: #"]')
+        );
+
+        // "New comment" badge on the card
+        const hasNewComment = fullText.toLowerCase().includes('new comment');
+
+        // Check if Ahmed Dino already commented
         const dinoAlreadyCommented = fullText.includes('Ahmed Dino');
 
-        // Get the latest reply text (last comment in the thread preview)
+        // Latest reply text
         const commentEls = el?.querySelectorAll('[class*="comment"], [class*="reply"]');
         const latestReply = commentEls?.length
           ? commentEls[commentEls.length - 1]?.innerText?.trim()
           : '';
 
-        // Try to extract author name and profile link
+        // Author
         const authorLink = el?.querySelector('a[href*="/u/"], a[href*="/@"]');
         const authorProfile = authorLink
           ? `https://www.skool.com${authorLink.getAttribute('href')}`
@@ -106,15 +115,26 @@ export class SkoolBot {
           id: postId,
           url: `https://www.skool.com${href}`,
           body: text,
-          author: authorName || author,
+          author: authorName,
           authorProfile,
           dinoAlreadyCommented,
           latestReply,
+          hasUnreadDot,
+          hasNewComment,
         });
       });
 
-      return results.slice(0, 15);
+      // Sort: unread dots and new comments first
+      results.sort((a, b) => {
+        const aScore = (a.hasUnreadDot ? 2 : 0) + (a.hasNewComment ? 1 : 0);
+        const bScore = (b.hasUnreadDot ? 2 : 0) + (b.hasNewComment ? 1 : 0);
+        return bScore - aScore;
+      });
+
+      return results.slice(0, 20);
     });
+
+    console.log(`Found ${posts.length} posts. Unread: ${posts.filter(p => p.hasUnreadDot).length}, New comments: ${posts.filter(p => p.hasNewComment).length}`);
 
     console.log(`Found ${posts.length} posts on feed.`);
     return posts;

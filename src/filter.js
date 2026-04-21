@@ -55,7 +55,14 @@ export function shouldReplyToPost(post) {
     return { reply: true, reason: 'substantive follow-up after Dino comment' };
   }
 
-  // Fresh post Dino hasn't touched — reply if engaging
+  // Fresh post Dino hasn't touched — prioritise unread dots and new comment flags
+  if (post.hasUnreadDot || post.hasNewComment) {
+    if (QUESTION_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'unread question' };
+    if (STRUGGLE_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'unread struggle' };
+    if (WIN_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'unread win' };
+    if (body.length > 80) return { reply: true, reason: 'unread post' };
+  }
+
   if (QUESTION_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'question' };
   if (STRUGGLE_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'struggle' };
   if (WIN_WORDS.some(w => body.includes(w))) return { reply: true, reason: 'win' };
