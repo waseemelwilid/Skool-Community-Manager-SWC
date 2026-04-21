@@ -43,26 +43,28 @@ export class SkoolBot {
     console.log('Checking community feed...');
     await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    // Wait for React to render posts — wait for actual post links to appear
-    try {
-      await this.page.waitForSelector('a[href*="/p/"]', { timeout: 15000 });
-    } catch {
-      console.log('Post links not found after 15s, proceeding anyway...');
-    }
-    await this.page.waitForTimeout(3000);
+    // Wait longer for React SPA to render
+    await this.page.waitForTimeout(8000);
 
     // Scroll to trigger lazy-loaded posts
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       await this.page.evaluate(() => window.scrollBy(0, 1000));
-      await this.page.waitForTimeout(1000);
+      await this.page.waitForTimeout(1200);
     }
 
     const currentUrl = this.page.url();
     console.log('Feed URL:', currentUrl);
 
+    // Debug: dump ALL links to find the real post URL format
+    const allPageLinks = await this.page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).filter(Boolean)
+    );
+    console.log('ALL links on feed page:', JSON.stringify(allPageLinks.slice(0, 60)));
+
     const posts = await this.page.evaluate(() => {
       const results = [];
-      const links = document.querySelectorAll('a[href*="/p/"]');
+      // Try multiple post link patterns Skool might use
+      const links = document.querySelectorAll('a[href*="/p/"], a[href*="post"], a[href*="selfworkacademy/"]');
       const seen = new Set();
 
       links.forEach(link => {
@@ -199,22 +201,21 @@ export class SkoolBot {
     await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(4000);
 
-    // Click the chat/DM icon in the top nav to open the panel
-    const chatIconSelectors = [
-      '[aria-label*="chat" i]',
-      '[aria-label*="message" i]',
-      '[aria-label*="inbox" i]',
-      '[data-testid*="chat"]',
-      'a[href*="chat"]',
-      'button[class*="chat"]',
+    // Try direct chat URL patterns Skool uses
+    const chatUrls = [
+      `${BASE_URL}/${COMMUNITY_SLUG}/chat`,
+      `${BASE_URL}/${COMMUNITY_SLUG}/inbox`,
+      `${BASE_URL}/chat`,
     ];
 
-    for (const sel of chatIconSelectors) {
-      const el = this.page.locator(sel).first();
-      if (await el.count() > 0) {
-        console.log(`Clicking chat icon: ${sel}`);
-        await el.click();
-        await this.page.waitForTimeout(2000);
+    let chatPageLoaded = false;
+    for (const url of chatUrls) {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.page.waitForTimeout(3000);
+      const cur = this.page.url();
+      console.log(`Tried chat URL: ${url} → landed: ${cur}`);
+      if (!cur.includes('404') && cur !== `${BASE_URL}/`) {
+        chatPageLoaded = true;
         break;
       }
     }
