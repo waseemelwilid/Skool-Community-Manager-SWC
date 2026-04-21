@@ -195,71 +195,98 @@ export class SkoolBot {
   async getUnreadDMs() {
     console.log('Checking DMs...');
 
-    // Skool DMs are at the top-level /inbox (not community-scoped)
-    await this.page.goto(`${BASE_URL}/inbox`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // Skool DMs are a chat panel widget — navigate to community first
+    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(4000);
 
-    // Wait for DM threads to render
-    try {
-      await this.page.waitForSelector('a[href*="/inbox/"]', { timeout: 10000 });
-    } catch {
-      console.log('No DM thread links found, trying alternate selector...');
+    // Click the chat/DM icon in the top nav to open the panel
+    const chatIconSelectors = [
+      '[aria-label*="chat" i]',
+      '[aria-label*="message" i]',
+      '[aria-label*="inbox" i]',
+      '[data-testid*="chat"]',
+      'a[href*="chat"]',
+      'button[class*="chat"]',
+    ];
+
+    for (const sel of chatIconSelectors) {
+      const el = this.page.locator(sel).first();
+      if (await el.count() > 0) {
+        console.log(`Clicking chat icon: ${sel}`);
+        await el.click();
+        await this.page.waitForTimeout(2000);
+        break;
+      }
     }
-    await this.page.waitForTimeout(3000);
 
-    const currentUrl = this.page.url();
-    console.log('Inbox URL:', currentUrl);
+    // Log all links visible after opening panel for debugging
+    const allLinks = await this.page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).filter(Boolean)
+    );
+    const chatLinks = allLinks.filter(h => h.includes('chat') || h.includes('inbox') || h.includes('message') || h.includes('dm'));
+    console.log('Chat-related links found:', JSON.stringify(chatLinks.slice(0, 20)));
 
-    // Log raw page structure for debugging
-    const rawLinks = await this.page.evaluate(() => {
-      return Array.from(document.querySelectorAll('a')).map(a => a.getAttribute('href')).filter(Boolean).slice(0, 30);
-    });
-    console.log('All links on inbox page:', JSON.stringify(rawLinks));
-
+    // Find unread threads — look for links near unread indicators (blue dot or "(1)" count)
     const threads = await this.page.evaluate(() => {
       const results = [];
-      // Try multiple patterns Skool might use for DM thread links
-      const selectors = [
-        'a[href*="/inbox/"]',
-        'a[href*="/messages/"]',
-        'a[href*="/chat/"]',
-        'a[href*="/dm/"]',
-      ];
-
       const seen = new Set();
-      for (const sel of selectors) {
-        document.querySelectorAll(sel).forEach(link => {
-          const href = link.getAttribute('href');
-          if (!href || seen.has(href)) return;
-          seen.add(href);
-          const threadId = href.split('/').filter(Boolean).pop();
-          const text = link.innerText?.trim();
-          // Try to extract sender name from link text or nearby element
-          const senderEl = link.querySelector('[class*="name"], [class*="user"], strong, b') ||
-            link.closest('[class*="thread"], [class*="conversation"]')?.querySelector('[class*="name"], strong');
-          const sender = senderEl?.innerText?.trim() || '';
-          results.push({
-            id: threadId,
-            url: `https://www.skool.com${href}`,
-            preview: text?.slice(0, 200) || '',
-            sender,
-          });
+
+      // Find all list items or containers that have an unread badge
+      const allLinks = document.querySelectorAll('a[href]');
+      allLinks.forEach(link => {
+        const href = link.getAttribute('href');
+        if (!href) return;
+
+        // Only pick up links that look like individual chat/user threads
+        const isChatLink = href.includes('/chat/') || href.includes('/inbox/') || href.includes('/message/') || href.includes('/dm/');
+        // Also check: link text contains a number in parentheses like "(1)" = unread
+        const linkText = link.innerText || '';
+        const hasUnreadCount = /\(\d+\)/.test(linkText);
+        // Check for blue dot near this link
+        const container = link.closest('li, [class*="thread"], [class*="conversation"], [class*="chat-item"]');
+        const hasBlueDot = !!(container?.querySelector('[class*="unread"], [class*="dot"], [class*="badge"]'));
+
+        if (!isChatLink && !hasUnreadCount && !hasBlueDot) return;
+        if (seen.has(href)) return;
+        seen.add(href);
+
+        const threadId = href.split('/').filter(Boolean).pop();
+        // Extract sender name — look for name text near the link
+        const nameEl = container?.querySelector('[class*="name"], strong, b, h3, h4') || link;
+        const sender = nameEl?.innerText?.trim().replace(/\(\d+\)/, '').trim() || '';
+
+        results.push({
+          id: threadId || href,
+          url: href.startsWith('http') ? href : `https://www.skool.com${href}`,
+          sender,
+          hasUnread: hasUnreadCount || hasBlueDot,
         });
-      }
-      return results.slice(0, 5);
+      });
+
+      return results.filter(t => t.hasUnread).slice(0, 5);
     });
 
-    console.log(`Found ${threads.length} DM threads.`);
+    console.log(`Found ${threads.length} unread DM threads.`);
     return threads;
   }
 
   async getLastDMInThread(threadUrl) {
     await this.page.goto(threadUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(2000);
+    await this.page.waitForTimeout(3000);
+
+    // Wait for messages to load
+    try {
+      await this.page.waitForSelector('[class*="message"], [class*="chat"], [class*="bubble"]', { timeout: 8000 });
+    } catch { /* continue anyway */ }
 
     return await this.page.evaluate(() => {
-      const els = document.querySelectorAll('p, [class*="message"], [class*="body"]');
-      const texts = Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 5);
-      return texts[texts.length - 1] || '';
+      const selectors = ['[class*="message-body"]', '[class*="message"]', '[class*="bubble"]', '[class*="chat-text"]', 'p'];
+      for (const sel of selectors) {
+        const els = document.querySelectorAll(sel);
+        const texts = Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 3);
+        if (texts.length) return texts[texts.length - 1];
+      }
+      return '';
     });
   }
 
