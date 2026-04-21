@@ -1,11 +1,10 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Load Dino's real comments if available
 function loadVoiceSamples() {
   const voicePath = resolve(__dirname, '../my-voice.json');
   if (!existsSync(voicePath)) return '';
@@ -16,8 +15,7 @@ function loadVoiceSamples() {
   } catch { return ''; }
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You manage The Selfwork Club on Skool for Dino. Reply as Dino would.
 
@@ -28,16 +26,10 @@ CRITICAL — MATCH LENGTH TO THE POST:
 - NEVER write more than 3 sentences. If you're about to write a 4th — delete it.
 
 DINO'S REAL COMMENTS (match this energy exactly):
-"Well done @Sameer Ali" ← simple accountability post = simple reply.
-"Great work @Ahmed Ibrahim as long as you are showing up thats what matters"
-"communication is getting better by the day, keep at it!"
+"Well done @Sameer Ali" ← that's it. A simple accountability post gets a simple reply.
+"Great work @Ahmed Ibrahim as long as you are showing up thats what matters" ← brief, real, specific.
+"communication is getting better by the day, keep at it!" ← progress noted, no over-praise.
 "Where you travelling too?" ← casual, human, curious.
-"Your feelings aren't the issue. Your lack of control is."
-"You think silence makes people like you. It's doing the opposite."
-"did your parents really do 'nothing' for you?"
-
-LONG POST = LONGER REPLY (but still sounds like Dino, not an AI coach):
-When someone asks a real question, Dino challenges the premise and reframes directly — no bullet points, no structured advice, no buzzwords. Example:
 "@Aadam Afzal Stop shedding light on 'failure' as the bad thing, who said the goal is to stop failing? The more you fail, the more you learn and know what to improve, failure highlights gaps that you would be oblivious too if you're always winning. So all in all shift your perspective on failure, as failing is inevitable, you can only control your view on setbacks."
 
 TONE RULES:
@@ -52,23 +44,6 @@ TONE RULES:
 FORMULA for deeper posts only:
 Name what's happening → sharp truth or reframe → one short question.`;
 
-async function callWithRetry(fn, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const is429 = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('Too Many');
-      if (is429 && i < retries - 1) {
-        const wait = 60000; // wait 60s on rate limit
-        console.log(`Rate limited by Gemini. Waiting 60s before retry ${i + 1}...`);
-        await new Promise(r => setTimeout(r, wait));
-      } else {
-        throw err;
-      }
-    }
-  }
-}
-
 export async function generateReply(content, type = 'post', authorName = '') {
   const voiceSamples = loadVoiceSamples();
   const nameHint = authorName ? ` The member's name is ${authorName}.` : '';
@@ -76,20 +51,24 @@ export async function generateReply(content, type = 'post', authorName = '') {
     ? `A member sent this DM: "${content}"${nameHint}\n\nWrite a reply. Match the depth — short message = short reply.`
     : `A member posted this in the community: "${content}"${nameHint}\n\nWrite a reply. If it's a simple check-in or accountability post, keep it to one short sentence or less. Only go deeper if they shared something with real emotion or a question.`;
 
-  const result = await callWithRetry(() =>
-    model.generateContent(`${SYSTEM_PROMPT}${voiceSamples}\n\n${userMessage}`)
-  );
-  return result.response.text().trim();
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 150,
+    system: SYSTEM_PROMPT + voiceSamples,
+    messages: [{ role: 'user', content: userMessage }],
+  });
+  return response.content[0].text.trim();
 }
 
 export async function generateReengagementDM(memberName) {
-  const result = await callWithRetry(() => model.generateContent(`${SYSTEM_PROMPT}
-
-Generate a short re-engagement DM from Dino to a community member named ${memberName} who hasn't posted or been active in over a week.
-- 1-2 sentences max.
-- Warm but brief. Just checking in. Not needy.
-- Dino style: direct, no fluff.
-- Don't be cringe. Don't say "I noticed you've been quiet."
-- Examples of good check-ins: "Just checking in. Where are you at?" / "You good?" / "What's going on with you lately?"`));
-  return result.response.text().trim();
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 80,
+    system: SYSTEM_PROMPT,
+    messages: [{
+      role: 'user',
+      content: `Generate a short re-engagement DM from Dino to a community member named ${memberName} who hasn't posted or been active in over a week. 1-2 sentences max. Warm but brief. Dino style — direct, no fluff. Examples: "Just checking in. Where are you at?" / "You good?" / "What's going on with you lately?"`,
+    }],
+  });
+  return response.content[0].text.trim();
 }

@@ -34,7 +34,7 @@ jobs:
         env:
           SKOOL_EMAIL: ${{ secrets.SKOOL_EMAIL }}
           SKOOL_PASSWORD: ${{ secrets.SKOOL_PASSWORD }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: node src/index.js
 
       - name: Commit updated state

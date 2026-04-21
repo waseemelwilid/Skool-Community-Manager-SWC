@@ -23,7 +23,7 @@ async function run() {
     const posts = await bot.getNewPosts(state.lastChecked);
     let postReplies = 0;
 
-    for (const post of posts.slice(0, 5)) { // max 5 per run to avoid rate limits
+    for (const post of posts.slice(0, 3)) { // max 3 per run
       if (hasReplied(state, post.id)) {
         console.log(`Already replied to post ${post.id}, skipping.`);
         continue;
@@ -35,15 +35,18 @@ async function run() {
         continue;
       }
 
-      console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}..."`);
-      const response = await generateReply(post.body, 'post', post.author);
-      console.log(`Reply: ${response}`);
+      try {
+        console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}..."`);
+        const response = await generateReply(post.body, 'post', post.author);
+        console.log(`Reply: ${response}`);
+        await bot.replyToPost(post.url, response);
+        markReplied(state, post.id, 'post');
+        postReplies++;
+      } catch (err) {
+        console.log(`Failed to reply to post ${post.id}: ${err.message}`);
+      }
 
-      await bot.replyToPost(post.url, response);
-      markReplied(state, post.id, 'post');
-      postReplies++;
-
-      await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      await new Promise(r => setTimeout(r, 8000 + Math.random() * 4000));
     }
 
     // Track member activity from all posts (seen = active)
