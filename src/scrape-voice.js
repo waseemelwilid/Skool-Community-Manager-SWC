@@ -106,12 +106,16 @@ for (const postUrl of postLinks) {
 
 console.log(`\nTotal Dino comments found: ${dinoComments.length}`);
 
-writeFileSync('my-voice.json', JSON.stringify({
-  name: MY_NAME,
-  comments: dinoComments,
-  count: dinoComments.length,
-  scrapedAt: new Date().toISOString(),
-}, null, 2));
+if (dinoComments.length === 0) {
+  console.log('No comments found — keeping existing my-voice.json untouched.');
+} else {
+  writeFileSync('my-voice.json', JSON.stringify({
+    name: MY_NAME,
+    comments: dinoComments,
+    count: dinoComments.length,
+    scrapedAt: new Date().toISOString(),
+  }, null, 2));
+}
 
 console.log('Saved to my-voice.json');
 await browser.close();
