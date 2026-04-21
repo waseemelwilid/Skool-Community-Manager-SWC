@@ -3,6 +3,9 @@ import { chromium } from 'playwright';
 const COMMUNITY_SLUG = 'selfworkacademy';
 const BASE_URL = 'https://www.skool.com';
 
+// Skool nav pages — these are NOT posts
+const NAV_SLUGS = ['classroom', 'calendar', 'about', 'chat', '/-/', 'daily-accountability-submission'];
+
 export class SkoolBot {
   constructor() {
     this.browser = null;
@@ -31,7 +34,6 @@ export class SkoolBot {
     await this.page.fill('input[type="password"]', password);
     await this.page.click('button[type="submit"]');
 
-    // Wait for redirect away from login page
     await this.page.waitForFunction(
       () => !window.location.href.includes('/login'),
       { timeout: 60000 }
@@ -42,37 +44,40 @@ export class SkoolBot {
   async getNewPosts(since) {
     console.log('Checking community feed...');
     await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-    // Wait longer for React SPA to render
     await this.page.waitForTimeout(8000);
 
-    // Scroll to trigger lazy-loaded posts
+    // Scroll to load more posts
     for (let i = 0; i < 6; i++) {
       await this.page.evaluate(() => window.scrollBy(0, 1000));
       await this.page.waitForTimeout(1200);
     }
 
-    const currentUrl = this.page.url();
-    console.log('Feed URL:', currentUrl);
+    console.log('Feed URL:', this.page.url());
 
-    // Debug: dump ALL links to find the real post URL format
-    const allPageLinks = await this.page.evaluate(() =>
-      Array.from(document.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).filter(Boolean)
-    );
-    console.log('ALL links on feed page:', JSON.stringify(allPageLinks.slice(0, 60)));
-
-    const posts = await this.page.evaluate(() => {
+    const posts = await this.page.evaluate((slug) => {
+      const NAV = ['classroom', 'calendar', 'about', 'chat', '/-/', 'daily-accountability-submission'];
       const results = [];
-      // Try multiple post link patterns Skool might use
-      const links = document.querySelectorAll('a[href*="/p/"], a[href*="post"], a[href*="selfworkacademy/"]');
       const seen = new Set();
+
+      // Skool posts: a[href^="/selfworkacademy/"] excluding nav pages and profile links
+      const links = document.querySelectorAll(`a[href^="/${slug}/"]`);
 
       links.forEach(link => {
         const href = link.getAttribute('href');
-        const match = href.match(/\/p\/([^/?#]+)/);
-        if (!match) return;
+        if (!href) return;
 
-        const postId = match[1];
+        // Skip nav pages
+        if (NAV.some(n => href.includes(n))) return;
+        // Skip profile links (/@username)
+        if (href.includes('/@')) return;
+        // Skip query-only links with no slug change
+        const slug_part = href.split('/').filter(Boolean).slice(1).join('/').split('?')[0];
+        if (!slug_part || slug_part.length < 3) return;
+
+        // Post ID: use ?p= param if present, else use slug
+        const pMatch = href.match(/[?&]p=([^&]+)/);
+        const postId = pMatch ? pMatch[1] : slug_part;
+
         if (seen.has(postId)) return;
         seen.add(postId);
 
@@ -81,62 +86,46 @@ export class SkoolBot {
         for (let i = 0; i < 8; i++) {
           el = el.parentElement;
           if (!el) break;
-          const t = el.innerText?.trim();
-          if (t && t.length > 20) break;
+          if (el.innerText?.trim().length > 30) break;
         }
 
         const fullText = el?.innerText || '';
         const text = fullText.slice(0, 600);
+        if (text.length < 20) return;
 
-        // Blue dot = unread indicator
-        const hasUnreadDot = !!(
-          el?.querySelector('[class*="unread"], [class*="dot"], [class*="badge"], [class*="indicator"]') ||
-          el?.querySelector('circle, [style*="background: rgb(59"], [style*="background:#"], [style*="background: #"]')
-        );
-
-        // "New comment" badge on the card
         const hasNewComment = fullText.toLowerCase().includes('new comment');
-
-        // Check if Ahmed Dino already commented
         const dinoAlreadyCommented = fullText.includes('Ahmed Dino');
 
-        // Latest reply text
         const commentEls = el?.querySelectorAll('[class*="comment"], [class*="reply"]');
         const latestReply = commentEls?.length
           ? commentEls[commentEls.length - 1]?.innerText?.trim()
           : '';
 
-        // Author
-        const authorLink = el?.querySelector('a[href*="/u/"], a[href*="/@"]');
-        const authorProfile = authorLink
-          ? `https://www.skool.com${authorLink.getAttribute('href')}`
-          : null;
+        // Author: Skool profile links are /@username?g=community
+        const authorLink = el?.querySelector('a[href^="/@"]');
+        const authorHref = authorLink?.getAttribute('href') || '';
+        const authorProfile = authorHref ? `https://www.skool.com${authorHref}` : null;
         const authorName = authorLink?.innerText?.trim() || '';
+
+        // Clean URL — use the href without duplicate query params
+        const cleanUrl = href.startsWith('http') ? href : `https://www.skool.com${href.split('?')[0]}`;
 
         results.push({
           id: postId,
-          url: `https://www.skool.com${href}`,
+          url: cleanUrl,
           body: text,
           author: authorName,
           authorProfile,
           dinoAlreadyCommented,
           latestReply,
-          hasUnreadDot,
           hasNewComment,
         });
       });
 
-      // Sort: unread dots and new comments first
-      results.sort((a, b) => {
-        const aScore = (a.hasUnreadDot ? 2 : 0) + (a.hasNewComment ? 1 : 0);
-        const bScore = (b.hasUnreadDot ? 2 : 0) + (b.hasNewComment ? 1 : 0);
-        return bScore - aScore;
-      });
-
+      // New comments first
+      results.sort((a, b) => (b.hasNewComment ? 1 : 0) - (a.hasNewComment ? 1 : 0));
       return results.slice(0, 20);
-    });
-
-    console.log(`Found ${posts.length} posts. Unread: ${posts.filter(p => p.hasUnreadDot).length}, New comments: ${posts.filter(p => p.hasNewComment).length}`);
+    }, COMMUNITY_SLUG);
 
     console.log(`Found ${posts.length} posts on feed.`);
     return posts;
@@ -147,7 +136,6 @@ export class SkoolBot {
     await this.page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(3000);
 
-    // Try to find comment input
     const commentSelectors = [
       '[placeholder*="comment" i]',
       '[placeholder*="write" i]',
@@ -159,10 +147,7 @@ export class SkoolBot {
     let commentBox = null;
     for (const sel of commentSelectors) {
       const el = this.page.locator(sel).first();
-      if (await el.count() > 0) {
-        commentBox = el;
-        break;
-      }
+      if (await el.count() > 0) { commentBox = el; break; }
     }
 
     if (!commentBox) {
@@ -174,7 +159,6 @@ export class SkoolBot {
     await commentBox.fill(reply);
     await this.page.waitForTimeout(1000);
 
-    // Try to submit
     const submitSelectors = [
       'button:has-text("Post")',
       'button:has-text("Reply")',
@@ -184,10 +168,7 @@ export class SkoolBot {
 
     for (const sel of submitSelectors) {
       const btn = this.page.locator(sel).first();
-      if (await btn.count() > 0) {
-        await btn.click();
-        break;
-      }
+      if (await btn.count() > 0) { await btn.click(); break; }
     }
 
     await this.page.waitForTimeout(2000);
@@ -197,77 +178,53 @@ export class SkoolBot {
   async getUnreadDMs() {
     console.log('Checking DMs...');
 
-    // Skool DMs are a chat panel widget — navigate to community first
-    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(4000);
+    // Skool chat is at /selfworkacademy/chat
+    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/chat`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(5000);
+    console.log('Chat page URL:', this.page.url());
 
-    // Try direct chat URL patterns Skool uses
-    const chatUrls = [
-      `${BASE_URL}/${COMMUNITY_SLUG}/chat`,
-      `${BASE_URL}/${COMMUNITY_SLUG}/inbox`,
-      `${BASE_URL}/chat`,
-    ];
-
-    let chatPageLoaded = false;
-    for (const url of chatUrls) {
-      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await this.page.waitForTimeout(3000);
-      const cur = this.page.url();
-      console.log(`Tried chat URL: ${url} → landed: ${cur}`);
-      if (!cur.includes('404') && cur !== `${BASE_URL}/`) {
-        chatPageLoaded = true;
-        break;
-      }
-    }
-
-    // Log all links visible after opening panel for debugging
-    const allLinks = await this.page.evaluate(() =>
+    // Dump all links on chat page to find thread URL pattern
+    const allChatLinks = await this.page.evaluate(() =>
       Array.from(document.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).filter(Boolean)
     );
-    const chatLinks = allLinks.filter(h => h.includes('chat') || h.includes('inbox') || h.includes('message') || h.includes('dm'));
-    console.log('Chat-related links found:', JSON.stringify(chatLinks.slice(0, 20)));
+    console.log('All links on chat page:', JSON.stringify(allChatLinks.slice(0, 30)));
 
-    // Find unread threads — look for links near unread indicators (blue dot or "(1)" count)
-    const threads = await this.page.evaluate(() => {
+    const threads = await this.page.evaluate((slug) => {
       const results = [];
       const seen = new Set();
 
-      // Find all list items or containers that have an unread badge
       const allLinks = document.querySelectorAll('a[href]');
       allLinks.forEach(link => {
         const href = link.getAttribute('href');
         if (!href) return;
 
-        // Only pick up links that look like individual chat/user threads
-        const isChatLink = href.includes('/chat/') || href.includes('/inbox/') || href.includes('/message/') || href.includes('/dm/');
-        // Also check: link text contains a number in parentheses like "(1)" = unread
+        // Individual chat thread: /selfworkacademy/chat/[userId] or similar
+        const isChatThread = href.includes(`/${slug}/chat/`) || href.includes('/inbox/') || href.includes('/dm/');
         const linkText = link.innerText || '';
         const hasUnreadCount = /\(\d+\)/.test(linkText);
-        // Check for blue dot near this link
-        const container = link.closest('li, [class*="thread"], [class*="conversation"], [class*="chat-item"]');
-        const hasBlueDot = !!(container?.querySelector('[class*="unread"], [class*="dot"], [class*="badge"]'));
+        const container = link.closest('li, div, [class*="thread"], [class*="item"], [class*="row"]');
+        const hasBlueDot = !!(container?.querySelector('[class*="unread"], [class*="dot"], [class*="badge"], [class*="new"]'));
 
-        if (!isChatLink && !hasUnreadCount && !hasBlueDot) return;
+        if (!isChatThread && !hasUnreadCount && !hasBlueDot) return;
         if (seen.has(href)) return;
         seen.add(href);
 
         const threadId = href.split('/').filter(Boolean).pop();
-        // Extract sender name — look for name text near the link
-        const nameEl = container?.querySelector('[class*="name"], strong, b, h3, h4') || link;
+        const nameEl = container?.querySelector('[class*="name"], strong, b, h3, h4, p') || link;
         const sender = nameEl?.innerText?.trim().replace(/\(\d+\)/, '').trim() || '';
 
         results.push({
           id: threadId || href,
           url: href.startsWith('http') ? href : `https://www.skool.com${href}`,
           sender,
-          hasUnread: hasUnreadCount || hasBlueDot,
+          hasUnread: hasUnreadCount || hasBlueDot || isChatThread,
         });
       });
 
-      return results.filter(t => t.hasUnread).slice(0, 5);
-    });
+      return results.slice(0, 5);
+    }, COMMUNITY_SLUG);
 
-    console.log(`Found ${threads.length} unread DM threads.`);
+    console.log(`Found ${threads.length} DM threads.`);
     return threads;
   }
 
@@ -275,10 +232,9 @@ export class SkoolBot {
     await this.page.goto(threadUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(3000);
 
-    // Wait for messages to load
     try {
       await this.page.waitForSelector('[class*="message"], [class*="chat"], [class*="bubble"]', { timeout: 8000 });
-    } catch { /* continue anyway */ }
+    } catch { /* continue */ }
 
     return await this.page.evaluate(() => {
       const selectors = ['[class*="message-body"]', '[class*="message"]', '[class*="bubble"]', '[class*="chat-text"]', 'p'];
@@ -306,16 +262,10 @@ export class SkoolBot {
     let inputBox = null;
     for (const sel of inputSelectors) {
       const el = this.page.locator(sel).first();
-      if (await el.count() > 0) {
-        inputBox = el;
-        break;
-      }
+      if (await el.count() > 0) { inputBox = el; break; }
     }
 
-    if (!inputBox) {
-      console.log('Could not find DM input, skipping.');
-      return;
-    }
+    if (!inputBox) { console.log('Could not find DM input, skipping.'); return; }
 
     await inputBox.click();
     await inputBox.fill(reply);
@@ -328,7 +278,7 @@ export class SkoolBot {
   async sendNewDM(profileUrl, message) {
     console.log(`Sending re-engagement DM via profile: ${profileUrl}`);
     await this.page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(2000);
+    await this.page.waitForTimeout(3000);
 
     const msgSelectors = [
       'button:has-text("Message")',
@@ -343,10 +293,7 @@ export class SkoolBot {
       if (await el.count() > 0) { msgBtn = el; break; }
     }
 
-    if (!msgBtn) {
-      console.log('Could not find Message button on profile, skipping.');
-      return false;
-    }
+    if (!msgBtn) { console.log('No Message button found on profile, skipping.'); return false; }
 
     await msgBtn.click();
     await this.page.waitForTimeout(2000);
@@ -363,10 +310,7 @@ export class SkoolBot {
       if (await el.count() > 0) { inputBox = el; break; }
     }
 
-    if (!inputBox) {
-      console.log('Could not find DM compose box, skipping.');
-      return false;
-    }
+    if (!inputBox) { console.log('No DM compose box found, skipping.'); return false; }
 
     await inputBox.click();
     await inputBox.fill(message);
