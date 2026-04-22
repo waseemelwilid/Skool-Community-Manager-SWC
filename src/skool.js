@@ -321,14 +321,21 @@ export class SkoolBot {
       const items = findItems().slice(0, 15);
       console.log('DM items found:', items.length);
 
+      const JUNK = ['write something', 'the selfwork club', 'last comment', 'new comment'];
+
       return items.map((el, index) => {
         const text = el.innerText?.trim() || '';
         const lines = text.split('\n').filter(l => l.trim());
-        const sender = lines[0] || `unknown_${index}`;
+        const sender = (lines[0] || '').trim();
         const hasUnread = !!(
           el.querySelector('[class*="nread"], [class*="badge" i], [class*="dot"]:not([class*="dotted"])')
         ) || /\(\d+\)/.test(text);
-        return { index, sender: sender.trim(), hasUnread, preview: text.slice(0, 80) };
+        return { index, sender, hasUnread, preview: text.slice(0, 80) };
+      }).filter(t => {
+        if (!t.sender) return false;
+        if (/^\d+$/.test(t.sender)) return false; // pure number = badge count
+        if (JUNK.some(j => t.sender.toLowerCase().includes(j))) return false;
+        return true;
       });
     });
 
@@ -385,25 +392,16 @@ export class SkoolBot {
   }
 
   async replyToOpenChat(reply) {
-    const inputSelectors = [
-      '[placeholder*="message" i]',
-      '[placeholder*="reply" i]',
-      '[contenteditable="true"]',
-      'textarea',
-    ];
+    // Skool uses TipTap/ProseMirror — fill() doesn't work, must force-click then type
+    const editor = this.page.locator('[contenteditable="true"][class*="ProseMirror"], [contenteditable="true"][class*="skool-editor"], [contenteditable="true"]').first();
 
-    let inputBox = null;
-    for (const sel of inputSelectors) {
-      const el = this.page.locator(sel).first();
-      if (await el.count() > 0) { inputBox = el; break; }
-    }
+    if (await editor.count() === 0) { console.log('No DM input found, skipping.'); return false; }
 
-    if (!inputBox) { console.log('No DM input found, skipping.'); return false; }
-
-    await inputBox.click();
-    await inputBox.fill(reply);
+    await editor.click({ force: true });
     await this.page.waitForTimeout(500);
-    await inputBox.press('Enter');
+    await editor.type(reply, { delay: 30 });
+    await this.page.waitForTimeout(500);
+    await editor.press('Enter');
     await this.page.waitForTimeout(2000);
     console.log('DM reply sent.');
     return true;
