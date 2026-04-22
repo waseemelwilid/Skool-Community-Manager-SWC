@@ -138,7 +138,7 @@ export class SkoolBot {
     return posts;
   }
 
-  async replyToPost(postUrl, reply) {
+  async replyToPost(postUrl, reply, authorFirstName = '') {
     console.log(`Replying to post: ${postUrl}`);
     await this.page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(3000);
@@ -165,29 +165,44 @@ export class SkoolBot {
     await commentBox.click();
     await this.page.waitForTimeout(500);
 
-    // Handle @mentions — trigger Skool's autocomplete for each @Name
-    const parts = reply.split(/(@\w[\w\s]*)/);
-    for (const part of parts) {
-      if (part.startsWith('@')) {
-        const name = part.slice(1).trim().split(' ')[0]; // first word of name
-        await commentBox.type('@', { delay: 50 });
-        await this.page.waitForTimeout(800);
-        await commentBox.type(name, { delay: 80 });
-        await this.page.waitForTimeout(1000);
-        // Try to click the first autocomplete suggestion
-        const suggestion = this.page.locator('[class*="mention"], [class*="autocomplete"], [class*="suggestion"]').first();
-        if (await suggestion.count() > 0) {
-          await suggestion.click();
-          await this.page.waitForTimeout(500);
-        } else {
-          // No autocomplete — just type the rest of the name
-          const rest = part.slice(1 + name.length);
-          if (rest) await commentBox.type(rest, { delay: 30 });
+    // @mention the author first if we have their name
+    if (authorFirstName) {
+      await commentBox.type('@', { delay: 50 });
+      await this.page.waitForTimeout(800);
+      await commentBox.type(authorFirstName, { delay: 80 });
+      await this.page.waitForTimeout(1500);
+
+      // Try clicking the first suggestion in the autocomplete dropdown
+      const suggestionSelectors = [
+        '[class*="mention"] li:first-child',
+        '[class*="suggestion"]:first-child',
+        '[class*="autocomplete"] [class*="item"]:first-child',
+        '[class*="dropdown"] li:first-child',
+        '[role="listbox"] [role="option"]:first-child',
+        '[role="option"]:first-child',
+      ];
+
+      let picked = false;
+      for (const sel of suggestionSelectors) {
+        const el = this.page.locator(sel).first();
+        if (await el.count() > 0) {
+          await el.click();
+          picked = true;
+          console.log(`@mention selected via: ${sel}`);
+          break;
         }
-      } else if (part) {
-        await commentBox.type(part, { delay: 30 });
       }
+      if (!picked) {
+        // Fallback: press Enter to pick first suggestion
+        await commentBox.press('Enter');
+        console.log('@mention selected via Enter');
+      }
+      await this.page.waitForTimeout(500);
+      await commentBox.type(' ', { delay: 30 }); // space after mention
     }
+
+    // Type the reply text
+    await commentBox.type(reply, { delay: 30 });
     await this.page.waitForTimeout(1000);
 
     // Try clicking submit button first

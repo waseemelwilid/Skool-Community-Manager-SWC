@@ -43,7 +43,8 @@ async function run() {
         continue;
       }
       try {
-        await bot.replyToPost(post.url, response);
+        const firstName = (post.author || '').split(' ')[0];
+        await bot.replyToPost(post.url, response, firstName);
         markReplied(state, post.id, 'post');
         postReplies++;
       } catch (err) {
