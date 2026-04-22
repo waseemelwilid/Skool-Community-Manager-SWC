@@ -101,11 +101,17 @@ export class SkoolBot {
           ? commentEls[commentEls.length - 1]?.innerText?.trim()
           : '';
 
-        // Author: Skool profile links are /@username?g=community
-        const authorLink = el?.querySelector('a[href^="/@"]');
+        // Author: find the /@username link — the href contains the slug, text may be a count
+        // The real author name is in a nearby text element, not the link text itself
+        const authorLinks = el?.querySelectorAll('a[href^="/@"]');
+        const authorLink = authorLinks?.[0];
         const authorHref = authorLink?.getAttribute('href') || '';
         const authorProfile = authorHref ? `https://www.skool.com${authorHref}` : null;
-        const authorName = authorLink?.innerText?.trim() || '';
+        // Extract username from href slug e.g. /@ahmed-ibrahim-5780 → "ahmed ibrahim"
+        const hrefSlug = authorHref.split('?')[0].replace('/@', '').replace(/-\d+$/, '').replace(/-/g, ' ');
+        const authorName = hrefSlug || authorLink?.innerText?.trim() || '';
+        // Detect if Dino is the author from the profile URL slug
+        const isDinoPost = authorHref.includes('@dino') || (authorHref.includes('ahmed') && authorHref.includes('dino'));
 
         // Clean URL — use the href without duplicate query params
         const cleanUrl = href.startsWith('http') ? href : `https://www.skool.com${href.split('?')[0]}`;
@@ -116,6 +122,7 @@ export class SkoolBot {
           body: text,
           author: authorName,
           authorProfile,
+          isDinoPost,
           dinoAlreadyCommented,
           latestReply,
           hasNewComment,
