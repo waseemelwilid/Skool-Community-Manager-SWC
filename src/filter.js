@@ -1,4 +1,4 @@
-const SKIP_PATTERNS = ['new leaderboard', 'new members start here', 'check out', 'http'];
+const SKIP_PATTERNS = ['new leaderboard', 'new members start here'];
 
 export function shouldReplyToPost(post) {
   const body = post.body || '';

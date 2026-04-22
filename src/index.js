@@ -30,10 +30,8 @@ async function run() {
       }
 
       const { reply, reason } = shouldReplyToPost(post);
-      if (!reply) {
-        console.log(`Skipping post ${post.id}: ${reason}`);
-        continue;
-      }
+      console.log(`Post ${post.id} | dino:${post.isDinoPost} | age:${(post.body||'').match(/\b\d+[dwm]\s*[•·]/)?.[0]||'?'} | ${reply ? 'REPLY' : 'SKIP'} — ${reason}`);
+      if (!reply) continue;
 
       console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}"`);
       let response;
