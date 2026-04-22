@@ -1,28 +1,22 @@
-const SKIP_PATTERNS = ['new leaderboard', 'new members start here', 'new-leaderboard', 'new-members-start'];
+// Known Dino-authored post URL slugs to always skip
+const SKIP_SLUGS = ['new-leaderboard-challenge', 'new-members-start-here', 'about', 'classroom', 'calendar'];
 
 export function shouldReplyToPost(post) {
   const body = post.body || '';
-  const bodyLower = body.toLowerCase();
+  const url = post.url || '';
 
-  // Never reply to Dino's own posts — use profile URL slug, not name in body
-  if (post.isDinoPost) return { reply: false, reason: 'own post' };
-
-  // Skip announcements/links
-  if (SKIP_PATTERNS.some(p => bodyLower.includes(p))) {
-    return { reply: false, reason: 'skip pattern' };
+  // Skip known Dino post URLs by slug
+  if (SKIP_SLUGS.some(s => url.includes(s))) {
+    return { reply: false, reason: 'known dino post' };
   }
 
-  // Skool time format: 29m=minutes, 2h=hours, 1d=days, 2w=weeks
-  // Skip if older than 48 hours
+  // Skip if older than 48h — Skool format: 29m=minutes, 2h=hours, 1d=days, 2w=weeks
   const ageMatch = body.match(/\b(\d+)([mhd])\s*[•·]/);
   if (ageMatch) {
     const num = parseInt(ageMatch[1]);
     const unit = ageMatch[2];
-    if (unit === 'm') {} // minutes — always reply
-    else if (unit === 'h') {} // hours — always reply
-    else if (unit === 'd' && num > 2) return { reply: false, reason: `too old (${num}d)` };
+    if (unit === 'd' && num > 2) return { reply: false, reason: `too old (${num}d)` };
   }
-  // Skip weeks/months shown as "2w •" or a calendar date
   if (/\b\d+w\s*[•·]/.test(body)) return { reply: false, reason: 'too old (weeks)' };
   if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d/.test(body)) {
     return { reply: false, reason: 'too old (date)' };
