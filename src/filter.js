@@ -12,14 +12,18 @@ export function shouldReplyToPost(post) {
     return { reply: false, reason: 'skip pattern' };
   }
 
-  // Skip posts older than 3 days — detect from body text ("9d •", "2w •", month names)
-  const ageMatch = body.match(/\b(\d+)([dwm])\s*[•·]/);
+  // Skool time format: 29m=minutes, 2h=hours, 1d=days, 2w=weeks
+  // Skip if older than 48 hours
+  const ageMatch = body.match(/\b(\d+)([mhd])\s*[•·]/);
   if (ageMatch) {
     const num = parseInt(ageMatch[1]);
     const unit = ageMatch[2];
-    if (unit === 'w' || unit === 'm') return { reply: false, reason: 'too old' };
-    if (unit === 'd' && num > 3) return { reply: false, reason: `too old (${num}d)` };
+    if (unit === 'm') {} // minutes — always reply
+    else if (unit === 'h') {} // hours — always reply
+    else if (unit === 'd' && num > 2) return { reply: false, reason: `too old (${num}d)` };
   }
+  // Skip weeks/months shown as "2w •" or a calendar date
+  if (/\b\d+w\s*[•·]/.test(body)) return { reply: false, reason: 'too old (weeks)' };
   if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d/.test(body)) {
     return { reply: false, reason: 'too old (date)' };
   }
