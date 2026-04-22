@@ -23,6 +23,10 @@ export class SkoolBot {
     });
     this.page = await context.newPage();
     this.page.setDefaultTimeout(60000);
+    // Forward browser console.log to Node output so page.evaluate() logs are visible
+    this.page.on('console', msg => {
+      if (msg.type() === 'log') console.log('[PAGE]', msg.text());
+    });
   }
 
   async login(email, password) {
@@ -281,90 +285,130 @@ export class SkoolBot {
       }
     }
     if (!chatOpened) {
-      // Fallback: find the chat bubble icon by its position in the nav bar
       chatOpened = await this.page.evaluate(() => {
-        const navIcons = document.querySelectorAll('nav a, header a, [class*="nav"] a, [class*="Nav"] a');
-        for (const el of navIcons) {
-          if (el.href?.includes('chat') || el.getAttribute('aria-label')?.toLowerCase().includes('chat')) {
+        const all = document.querySelectorAll('button, a');
+        for (const el of all) {
+          const label = (el.getAttribute('aria-label') || '').toLowerCase();
+          const cls = (el.className || '').toLowerCase();
+          const href = el.getAttribute('href') || '';
+          if (label.includes('chat') || label.includes('message') || cls.includes('chat') || href.includes('chat')) {
             el.click(); return true;
           }
         }
         return false;
       });
-      console.log(`Chat opened via fallback: ${chatOpened}`);
+      console.log(`Chat opened via evaluate fallback: ${chatOpened}`);
     }
     await this.page.waitForTimeout(3000);
 
-    const threads = await this.page.evaluate(() => {
-      // Skool DM panel: "Chats" header, each row has "Name (1) · 15h" format + avatar + blue dot
-      // Find the panel container first using the distinctive "Mark all as read" text
-      const chatPanel = Array.from(document.querySelectorAll('div')).find(el => {
-        const text = el.innerText || '';
-        return text.includes('Mark all as read') || text.includes('Chats') && text.includes('Search users');
+    // Debug: dump what's visible on page after opening chat
+    const debugInfo = await this.page.evaluate(() => {
+      const hasSep = (t) => t.includes('\u00b7') || t.includes('\u2022') || t.includes(' \u00b7 ') || t.includes(' \u2022 ');
+      const allDivs = Array.from(document.querySelectorAll('div'));
+      const withSep = allDivs.filter(el => {
+        const text = el.innerText?.trim() || '';
+        return hasSep(text) && el.querySelector('img') && text.length < 300;
       });
+      const panelTexts = allDivs
+        .filter(el => ['Mark all as read', 'Chats', 'Messages', 'Direct'].some(t => el.innerText?.includes(t)) && el.innerText?.length < 500)
+        .map(el => el.innerText?.trim().slice(0, 120));
+      return {
+        sepDivsCount: withSep.length,
+        sepDivPreviews: withSep.slice(0, 5).map(el => ({ text: el.innerText?.trim().slice(0, 80), h: Math.round(el.getBoundingClientRect().height), w: Math.round(el.getBoundingClientRect().width) })),
+        panelTexts: panelTexts.slice(0, 5),
+      };
+    });
+    console.log('DM debug — sep divs:', debugInfo.sepDivsCount, '| panels:', JSON.stringify(debugInfo.panelTexts));
+    console.log('DM debug — sep previews:', JSON.stringify(debugInfo.sepDivPreviews));
+
+    const threads = await this.page.evaluate(() => {
+      const hasSep = (t) => t.includes('\u00b7') || t.includes('\u2022');
+
+      // Find chat panel by multiple text signatures
+      const panelSignatures = [
+        el => el.innerText?.includes('Mark all as read'),
+        el => el.innerText?.includes('Chats') && el.innerText?.includes('Search'),
+        el => el.innerText?.includes('Messages') && el.innerText?.includes('Search'),
+        el => el.innerText?.includes('Direct Messages'),
+      ];
+      let chatPanel = null;
+      for (const sig of panelSignatures) {
+        chatPanel = Array.from(document.querySelectorAll('div')).find(el => {
+          try { return sig(el) && el.innerText?.length < 3000; } catch { return false; }
+        });
+        if (chatPanel) { console.log('Panel found, text preview:', chatPanel.innerText?.slice(0, 80)); break; }
+      }
 
       let items = [];
       if (chatPanel) {
-        // Conversation rows contain an img (avatar) + the "·" time separator
         items = Array.from(chatPanel.querySelectorAll('div')).filter(el => {
           const rect = el.getBoundingClientRect();
           const text = el.innerText?.trim() || '';
           const hasImg = !!el.querySelector('img');
-          // "·" separates name from time in every conversation row
-          return hasImg && rect.height > 40 && rect.height < 100 &&
-                 rect.width > 150 && text.includes('·');
+          return hasImg && rect.height > 30 && rect.height < 120 && rect.width > 100 && hasSep(text);
         });
+        console.log('Items from panel:', items.length);
       }
 
-      // Fallback if panel not found: look for any div with avatar + "·" time format
+      // Full-page fallback: avatar + separator + short text
       if (!items.length) {
         items = Array.from(document.querySelectorAll('div')).filter(el => {
           const rect = el.getBoundingClientRect();
           const text = el.innerText?.trim() || '';
           const hasImg = !!el.querySelector('img');
-          return hasImg && rect.height > 40 && rect.height < 100 &&
-                 rect.width > 150 && text.includes('·') && text.length < 200;
+          return hasImg && rect.height > 30 && rect.height < 120 &&
+                 rect.width > 100 && hasSep(text) && text.length < 300;
         });
+        console.log('Items from page fallback:', items.length);
       }
 
       items = items.slice(0, 10);
-      console.log('DM items found:', items.length);
-
       return items.map((el, index) => {
         const text = el.innerText?.trim() || '';
         const lines = text.split('\n').filter(l => l.trim());
-        const sender = (lines[0] || '').replace(/\s*\(\d+\)\s*/, '').replace(/·.*/, '').trim();
-        const hasUnread = /\(\d+\)/.test(lines[0] || '') ||
-          !!(el.querySelector('[style*="background"][style*="blue"], [class*="unread" i], [class*="badge" i]'));
-        return { index, sender, hasUnread, preview: text.slice(0, 100) };
-      }).filter(t => t.sender && t.sender.length > 1);
+        // Strip unread badge "(3)" and separator+time "· 2h" from sender name
+        const sender = (lines[0] || '')
+          .replace(/\s*\(\d+\)\s*/g, '')
+          .replace(/[\u00b7\u2022].*/, '')
+          .trim();
+        return { index, sender, preview: text.slice(0, 100) };
+      }).filter(t => t.sender && t.sender.length > 1 && !/^\d+$/.test(t.sender));
     });
 
-    console.log(`DM threads found: ${threads.length}`, threads.map(t => `${t.sender}(unread:${t.hasUnread})`).join(', '));
+    console.log(`DM threads found: ${threads.length}`, threads.map(t => t.sender).join(', '));
     return threads;
   }
 
   async openDMThread(index) {
     const clicked = await this.page.evaluate((idx) => {
-      const chatPanel = Array.from(document.querySelectorAll('div')).find(el => {
-        const text = el.innerText || '';
-        return text.includes('Mark all as read') || (text.includes('Chats') && text.includes('Search users'));
-      });
+      const hasSep = (t) => t.includes('\u00b7') || t.includes('\u2022');
+      const panelSignatures = [
+        el => el.innerText?.includes('Mark all as read'),
+        el => el.innerText?.includes('Chats') && el.innerText?.includes('Search'),
+        el => el.innerText?.includes('Messages') && el.innerText?.includes('Search'),
+      ];
+      let chatPanel = null;
+      for (const sig of panelSignatures) {
+        chatPanel = Array.from(document.querySelectorAll('div')).find(el => {
+          try { return sig(el) && el.innerText?.length < 3000; } catch { return false; }
+        });
+        if (chatPanel) break;
+      }
       let items = [];
       if (chatPanel) {
         items = Array.from(chatPanel.querySelectorAll('div')).filter(el => {
           const rect = el.getBoundingClientRect();
           const text = el.innerText?.trim() || '';
-          return !!el.querySelector('img') && rect.height > 40 && rect.height < 100 &&
-                 rect.width > 150 && text.includes('·');
+          return !!el.querySelector('img') && rect.height > 30 && rect.height < 120 &&
+                 rect.width > 100 && hasSep(text);
         });
       }
       if (!items.length) {
         items = Array.from(document.querySelectorAll('div')).filter(el => {
           const rect = el.getBoundingClientRect();
           const text = el.innerText?.trim() || '';
-          return !!el.querySelector('img') && rect.height > 40 && rect.height < 100 &&
-                 rect.width > 150 && text.includes('·') && text.length < 200;
+          return !!el.querySelector('img') && rect.height > 30 && rect.height < 120 &&
+                 rect.width > 100 && hasSep(text) && text.length < 300;
         });
       }
       if (items[idx]) { items[idx].click(); return true; }
@@ -376,38 +420,65 @@ export class SkoolBot {
   }
 
   async getLastMessageInOpenChat() {
+    await this.page.waitForTimeout(1000);
     return await this.page.evaluate(() => {
-      // Find message bubbles — try specific selectors first
-      const selectors = [
+      // Try class-name-based selectors first
+      const classSelectors = [
         '[class*="MessageBody"]', '[class*="message-body"]',
         '[class*="MessageText"]', '[class*="message-text"]',
         '[class*="BubbleText"]', '[class*="bubble-text"]',
         '[class*="ChatText"]', '[class*="chat-text"]',
+        '[class*="msg-text"]', '[class*="MsgText"]',
       ];
-
       let bubbles = [];
-      for (const sel of selectors) {
+      for (const sel of classSelectors) {
         const els = Array.from(document.querySelectorAll(sel))
           .filter(e => (e.innerText?.trim().length || 0) > 2);
-        if (els.length) { bubbles = els; break; }
+        if (els.length) { bubbles = els; console.log('Bubbles via:', sel, els.length); break; }
       }
 
-      if (!bubbles.length) return { text: '', dinoSentLast: false };
+      // Fallback: find chat scroll area then collect p/span with text
+      if (!bubbles.length) {
+        const chatArea = Array.from(document.querySelectorAll('div')).find(el => {
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          return (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+                 rect.height > 200 && rect.width > 200;
+        });
+        if (chatArea) {
+          bubbles = Array.from(chatArea.querySelectorAll('p, span, div'))
+            .filter(el => {
+              const text = el.innerText?.trim() || '';
+              const children = el.querySelectorAll('p, span, div').length;
+              return text.length > 5 && text.length < 2000 && children < 3;
+            });
+          console.log('Bubbles via chatArea scroll:', bubbles.length);
+        }
+      }
+
+      if (!bubbles.length) { console.log('No message bubbles found'); return { text: '', dinoSentLast: false }; }
 
       const last = bubbles[bubbles.length - 1];
       const text = last.innerText?.trim() || '';
 
-      // Detect if Dino sent the last message:
-      // Skool styles outgoing messages differently — check ancestors for "sent", "outgoing", "right", "self" classes
+      // Detect outgoing: class-based first, then computed style (align-self: flex-end = outgoing)
       let el = last;
       let dinoSentLast = false;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 8; i++) {
         el = el.parentElement;
         if (!el) break;
         const cls = (el.className || '').toLowerCase();
-        if (/\b(sent|outgoing|self|right|me)\b/.test(cls)) { dinoSentLast = true; break; }
+        if (/\b(sent|outgoing|self|right|me|owner|local)\b/.test(cls)) { dinoSentLast = true; break; }
+        const style = window.getComputedStyle(el);
+        if (style.alignSelf === 'flex-end' || style.marginLeft === 'auto') { dinoSentLast = true; break; }
+        const rect = el.getBoundingClientRect();
+        const parentRect = el.parentElement?.getBoundingClientRect();
+        if (parentRect && parentRect.width > 200 && rect.left > parentRect.left + parentRect.width * 0.4) {
+          dinoSentLast = true; break;
+        }
       }
 
+      console.log('Last msg text:', text.slice(0, 60), '| dinoSentLast:', dinoSentLast);
       return { text, dinoSentLast };
     });
   }
