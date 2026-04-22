@@ -31,14 +31,9 @@ export function shouldReplyToPost(post) {
   // Skip very short posts
   if (body.length < 30) return { reply: false, reason: 'too short' };
 
-  // If Dino already commented, only continue if latest reply has depth
-  if (post.dinoAlreadyCommented) {
-    const latest = post.latestReply || '';
-    if (!latest || latest.length < 30) return { reply: false, reason: 'dead convo' };
-    return { reply: true, reason: 'substantive follow-up' };
-  }
+  // Skip if Dino already commented
+  if (post.dinoAlreadyCommented) return { reply: false, reason: 'dino already commented' };
 
-  // Reply to any recent member post
   return { reply: true, reason: 'recent member post' };
 }
 
