@@ -369,12 +369,18 @@ export class SkoolBot {
       return items.map((el, index) => {
         const text = el.innerText?.trim() || '';
         const lines = text.split('\n').filter(l => l.trim());
-        // Strip unread badge "(3)" and separator+time "· 2h" from sender name
-        const sender = (lines[0] || '')
+        // Line 0: "Name (3) · 2h" — strip badge and time to get sender
+        const firstLine = lines[0] || '';
+        const sender = firstLine
           .replace(/\s*\(\d+\)\s*/g, '')
           .replace(/[\u00b7\u2022].*/, '')
           .trim();
-        return { index, sender, preview: text.slice(0, 100) };
+        // Lines 1+: message preview. "You: ..." means Dino sent last.
+        const rawPreview = lines.slice(1).join(' ').trim();
+        const dinoSentLast = /^you[:\s]/i.test(rawPreview);
+        const lastMessage = rawPreview.replace(/^you[:\s]+/i, '').trim();
+        console.log(`DM ${index}: sender="${sender}" dinoSentLast=${dinoSentLast} msg="${lastMessage.slice(0, 60)}"`);
+        return { index, sender, lastMessage, dinoSentLast, preview: text.slice(0, 100) };
       }).filter(t => t.sender && t.sender.length > 1 && !/^\d+$/.test(t.sender));
     });
 

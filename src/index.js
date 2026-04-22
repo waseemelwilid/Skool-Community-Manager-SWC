@@ -70,19 +70,25 @@ async function run() {
     let dmReplies = 0;
 
     for (const thread of threads.slice(0, 5)) {
-      await bot.openDMThread(thread.index);
-      const { text: lastMessage, dinoSentLast } = await bot.getLastMessageInOpenChat();
-      const { reply, reason } = shouldReplyToDM(lastMessage, dinoSentLast);
+      // Filter using preview text extracted directly from DM list — no need to open thread just to read
+      const { reply, reason } = shouldReplyToDM(thread.lastMessage, thread.dinoSentLast);
 
       if (!reply) {
         console.log(`Skipping DM from ${thread.sender}: ${reason}`);
         continue;
       }
 
-      console.log(`\nReplying to DM from ${thread.sender}:\n"${(lastMessage || '').slice(0, 100)}"`);
-      const response = await generateReply(lastMessage, 'dm');
-      console.log(`Reply: ${response}`);
+      console.log(`\nReplying to DM from ${thread.sender}:\n"${(thread.lastMessage || '').slice(0, 100)}"`);
+      let response;
+      try {
+        response = await generateReply(thread.lastMessage, 'dm');
+        console.log(`Reply: ${response}`);
+      } catch (err) {
+        console.log(`Claude API error for DM: ${err.message}`);
+        continue;
+      }
 
+      await bot.openDMThread(thread.index);
       const sent = await bot.replyToOpenChat(response);
       if (sent) {
         dmReplies++;
