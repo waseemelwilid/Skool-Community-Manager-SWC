@@ -66,13 +66,11 @@ async function run() {
     }
 
     // --- DMs ---
-    const threads = await bot.getUnreadDMs();
+    const threads = await bot.getDMThreads();
     let dmReplies = 0;
 
-    for (const thread of threads) {
-      if (!thread.hasUnread) continue;
-
-      // Use sender name as DM id — unread flag resets after we reply so no double-send risk
+    for (const thread of threads.slice(0, 5)) {
+      // Don't filter by hasUnread — DOM detection is unreliable. Use dinoSentLast as the real guard.
       const dmId = `dm_${thread.sender.toLowerCase().replace(/\s+/g, '_')}`;
       if (hasReplied(state, dmId)) {
         console.log(`Already replied to DM from ${thread.sender} this run, skipping.`);

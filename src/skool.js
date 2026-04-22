@@ -256,7 +256,7 @@ export class SkoolBot {
     console.log('Reply posted.');
   }
 
-  async getUnreadDMs() {
+  async getDMThreads() {
     console.log('Checking DMs...');
     await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(4000);
