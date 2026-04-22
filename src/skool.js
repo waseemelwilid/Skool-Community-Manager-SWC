@@ -110,8 +110,8 @@ export class SkoolBot {
         // Extract username from href slug e.g. /@ahmed-ibrahim-5780 → "ahmed ibrahim"
         const hrefSlug = authorHref.split('?')[0].replace('/@', '').replace(/-\d+$/, '').replace(/-/g, ' ');
         const authorName = hrefSlug || authorLink?.innerText?.trim() || '';
-        // Detect if Dino is the author from the profile URL slug
-        const isDinoPost = authorHref.includes('@dino') || (authorHref.includes('ahmed') && authorHref.includes('dino'));
+        // Dino's exact profile slug is /@dino — only skip if it's his specific account
+        const isDinoPost = /^\/@dino[?&]/.test(authorHref) || authorHref === '/@dino';
 
         // Clean URL — use the href without duplicate query params
         const cleanUrl = href.startsWith('http') ? href : `https://www.skool.com${href.split('?')[0]}`;
