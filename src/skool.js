@@ -164,8 +164,30 @@ export class SkoolBot {
 
     await commentBox.click();
     await this.page.waitForTimeout(500);
-    // Use type() instead of fill() for contenteditable elements
-    await commentBox.type(reply, { delay: 30 });
+
+    // Handle @mentions — trigger Skool's autocomplete for each @Name
+    const parts = reply.split(/(@\w[\w\s]*)/);
+    for (const part of parts) {
+      if (part.startsWith('@')) {
+        const name = part.slice(1).trim().split(' ')[0]; // first word of name
+        await commentBox.type('@', { delay: 50 });
+        await this.page.waitForTimeout(800);
+        await commentBox.type(name, { delay: 80 });
+        await this.page.waitForTimeout(1000);
+        // Try to click the first autocomplete suggestion
+        const suggestion = this.page.locator('[class*="mention"], [class*="autocomplete"], [class*="suggestion"]').first();
+        if (await suggestion.count() > 0) {
+          await suggestion.click();
+          await this.page.waitForTimeout(500);
+        } else {
+          // No autocomplete — just type the rest of the name
+          const rest = part.slice(1 + name.length);
+          if (rest) await commentBox.type(rest, { delay: 30 });
+        }
+      } else if (part) {
+        await commentBox.type(part, { delay: 30 });
+      }
+    }
     await this.page.waitForTimeout(1000);
 
     // Try clicking submit button first
