@@ -372,22 +372,38 @@ export class SkoolBot {
 
   async getLastMessageInOpenChat() {
     return await this.page.evaluate(() => {
-      // Messages are in the right panel — get the last visible message bubble
+      // Find message bubbles — try specific selectors first
       const selectors = [
         '[class*="MessageBody"]', '[class*="message-body"]',
         '[class*="MessageText"]', '[class*="message-text"]',
         '[class*="BubbleText"]', '[class*="bubble-text"]',
-        '[class*="ChatText"]',
+        '[class*="ChatText"]', '[class*="chat-text"]',
       ];
+
+      let bubbles = [];
       for (const sel of selectors) {
-        const els = document.querySelectorAll(sel);
-        const texts = Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 2);
-        if (texts.length) return texts[texts.length - 1];
+        const els = Array.from(document.querySelectorAll(sel))
+          .filter(e => (e.innerText?.trim().length || 0) > 2);
+        if (els.length) { bubbles = els; break; }
       }
-      // Broad fallback: paragraphs inside the right half of the page
-      const allP = document.querySelectorAll('p');
-      const texts = Array.from(allP).map(e => e.innerText?.trim()).filter(t => t && t.length > 5);
-      return texts[texts.length - 1] || '';
+
+      if (!bubbles.length) return { text: '', dinoSentLast: false };
+
+      const last = bubbles[bubbles.length - 1];
+      const text = last.innerText?.trim() || '';
+
+      // Detect if Dino sent the last message:
+      // Skool styles outgoing messages differently — check ancestors for "sent", "outgoing", "right", "self" classes
+      let el = last;
+      let dinoSentLast = false;
+      for (let i = 0; i < 6; i++) {
+        el = el.parentElement;
+        if (!el) break;
+        const cls = (el.className || '').toLowerCase();
+        if (/\b(sent|outgoing|self|right|me)\b/.test(cls)) { dinoSentLast = true; break; }
+      }
+
+      return { text, dinoSentLast };
     });
   }
 

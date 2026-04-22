@@ -28,12 +28,9 @@ export function shouldReplyToPost(post) {
   return { reply: true, reason: 'recent member post' };
 }
 
-export function shouldReplyToDM(lastMessage, lastSender) {
+export function shouldReplyToDM(lastMessage, dinoSentLast) {
   if (!lastMessage || lastMessage.length < 5) return { reply: false, reason: 'empty' };
-  const sender = (lastSender || '').toLowerCase();
-  if (sender.includes('ahmed') || sender.includes('dino')) {
-    return { reply: false, reason: 'dino sent last' };
-  }
+  if (dinoSentLast) return { reply: false, reason: 'dino sent last' };
   if (lastMessage.length < 15) return { reply: false, reason: 'dead reply' };
   return { reply: true, reason: 'member message' };
 }

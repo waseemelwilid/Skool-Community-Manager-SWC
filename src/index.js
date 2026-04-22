@@ -80,8 +80,8 @@ async function run() {
       }
 
       await bot.openDMThread(thread.index);
-      const lastMessage = await bot.getLastMessageInOpenChat();
-      const { reply, reason } = shouldReplyToDM(lastMessage, thread.sender);
+      const { text: lastMessage, dinoSentLast } = await bot.getLastMessageInOpenChat();
+      const { reply, reason } = shouldReplyToDM(lastMessage, dinoSentLast);
 
       if (!reply) {
         console.log(`Skipping DM from ${thread.sender}: ${reason}`);
