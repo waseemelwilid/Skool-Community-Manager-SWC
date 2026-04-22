@@ -296,47 +296,48 @@ export class SkoolBot {
     await this.page.waitForTimeout(3000);
 
     const threads = await this.page.evaluate(() => {
-      // Find conversation list items — Skool chat is a React SPA, no anchor tags
-      // Strategy: find repeated sibling elements that contain an avatar image + text
-      const findItems = () => {
-        // Try known role/class patterns first
-        const byRole = document.querySelectorAll('[role="listitem"]');
-        if (byRole.length > 1) return Array.from(byRole);
+      // Skool DM panel: "Chats" header, each row has "Name (1) · 15h" format + avatar + blue dot
+      // Find the panel container first using the distinctive "Mark all as read" text
+      const chatPanel = Array.from(document.querySelectorAll('div')).find(el => {
+        const text = el.innerText || '';
+        return text.includes('Mark all as read') || text.includes('Chats') && text.includes('Search users');
+      });
 
-        const patterns = ['DirectMessage', 'Conversation', 'ChatRow', 'ThreadRow', 'InboxItem', 'MessageItem'];
-        for (const p of patterns) {
-          const found = document.querySelectorAll(`[class*="${p}"]`);
-          if (found.length > 0) return Array.from(found);
-        }
-
-        // Fallback: divs that contain an avatar img and have short height (typical chat row)
-        return Array.from(document.querySelectorAll('div')).filter(el => {
+      let items = [];
+      if (chatPanel) {
+        // Conversation rows contain an img (avatar) + the "·" time separator
+        items = Array.from(chatPanel.querySelectorAll('div')).filter(el => {
           const rect = el.getBoundingClientRect();
-          const hasAvatar = !!(el.querySelector('img[class*="avatar" i], img[class*="Avatar"], [class*="avatar" i] img'));
           const text = el.innerText?.trim() || '';
-          return hasAvatar && text.length > 2 && rect.height > 20 && rect.height < 110 && rect.width > 150;
+          const hasImg = !!el.querySelector('img');
+          // "·" separates name from time in every conversation row
+          return hasImg && rect.height > 40 && rect.height < 100 &&
+                 rect.width > 150 && text.includes('·');
         });
-      };
+      }
 
-      const items = findItems().slice(0, 15);
+      // Fallback if panel not found: look for any div with avatar + "·" time format
+      if (!items.length) {
+        items = Array.from(document.querySelectorAll('div')).filter(el => {
+          const rect = el.getBoundingClientRect();
+          const text = el.innerText?.trim() || '';
+          const hasImg = !!el.querySelector('img');
+          return hasImg && rect.height > 40 && rect.height < 100 &&
+                 rect.width > 150 && text.includes('·') && text.length < 200;
+        });
+      }
+
+      items = items.slice(0, 10);
       console.log('DM items found:', items.length);
-
-      const JUNK = ['write something', 'the selfwork club', 'last comment', 'new comment'];
 
       return items.map((el, index) => {
         const text = el.innerText?.trim() || '';
         const lines = text.split('\n').filter(l => l.trim());
-        const sender = (lines[0] || '').trim();
-        const hasUnread = !!(
-          el.querySelector('[class*="nread"], [class*="badge" i], [class*="dot"]:not([class*="dotted"])')
-        ) || /\(\d+\)/.test(text);
-        return { index, sender, hasUnread, preview: text.slice(0, 80) };
-      }).filter(t => {
-        if (!t.sender) return false;
-        if (/^\d+$/.test(t.sender)) return false; // pure number = badge count
-        if (JUNK.some(j => t.sender.toLowerCase().includes(j))) return false;
-        return true;
-      });
+        const sender = (lines[0] || '').replace(/\s*\(\d+\)\s*/, '').replace(/·.*/, '').trim();
+        const hasUnread = /\(\d+\)/.test(lines[0] || '') ||
+          !!(el.querySelector('[style*="background"][style*="blue"], [class*="unread" i], [class*="badge" i]'));
+        return { index, sender, hasUnread, preview: text.slice(0, 100) };
+      }).filter(t => t.sender && t.sender.length > 1);
     });
 
     console.log(`DM threads found: ${threads.length}`, threads.map(t => `${t.sender}(unread:${t.hasUnread})`).join(', '));
@@ -344,24 +345,28 @@ export class SkoolBot {
   }
 
   async openDMThread(index) {
-    // Click the conversation at given index (chat panel already open)
     const clicked = await this.page.evaluate((idx) => {
-      const findItems = () => {
-        const byRole = document.querySelectorAll('[role="listitem"]');
-        if (byRole.length > 1) return Array.from(byRole);
-        const patterns = ['DirectMessage', 'Conversation', 'ChatRow', 'ThreadRow', 'InboxItem', 'MessageItem'];
-        for (const p of patterns) {
-          const found = document.querySelectorAll(`[class*="${p}"]`);
-          if (found.length > 0) return Array.from(found);
-        }
-        return Array.from(document.querySelectorAll('div')).filter(el => {
+      const chatPanel = Array.from(document.querySelectorAll('div')).find(el => {
+        const text = el.innerText || '';
+        return text.includes('Mark all as read') || (text.includes('Chats') && text.includes('Search users'));
+      });
+      let items = [];
+      if (chatPanel) {
+        items = Array.from(chatPanel.querySelectorAll('div')).filter(el => {
           const rect = el.getBoundingClientRect();
-          const hasAvatar = !!(el.querySelector('img[class*="avatar" i], img[class*="Avatar"], [class*="avatar" i] img'));
           const text = el.innerText?.trim() || '';
-          return hasAvatar && text.length > 2 && rect.height > 20 && rect.height < 110 && rect.width > 150;
+          return !!el.querySelector('img') && rect.height > 40 && rect.height < 100 &&
+                 rect.width > 150 && text.includes('·');
         });
-      };
-      const items = findItems();
+      }
+      if (!items.length) {
+        items = Array.from(document.querySelectorAll('div')).filter(el => {
+          const rect = el.getBoundingClientRect();
+          const text = el.innerText?.trim() || '';
+          return !!el.querySelector('img') && rect.height > 40 && rect.height < 100 &&
+                 rect.width > 150 && text.includes('·') && text.length < 200;
+        });
+      }
       if (items[idx]) { items[idx].click(); return true; }
       return false;
     }, index);
