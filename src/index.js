@@ -23,15 +23,21 @@ async function run() {
     const posts = await bot.getNewPosts(state.lastChecked);
     let postReplies = 0;
 
-    for (const post of posts.slice(0, 10)) { // max 10 per run
+    for (const post of posts.slice(0, 15)) { // max 15 per run
       if (hasReplied(state, post.id)) {
         console.log(`Already replied to post ${post.id}, skipping.`);
         continue;
       }
 
       const { reply, reason } = shouldReplyToPost(post);
-      console.log(`Post ${post.id} | dino:${post.isDinoPost} | age:${(post.body||'').match(/\b\d+[dwm]\s*[•·]/)?.[0]||'?'} | ${reply ? 'REPLY' : 'SKIP'} — ${reason}`);
+      console.log(`Post ${post.id} | age:${(post.body||'').match(/\b\d+[dwm]\s*[•·]/)?.[0]||'?'} | ${reply ? 'CHECK' : 'SKIP'} — ${reason}`);
       if (!reply) continue;
+
+      const dinoCommented = await bot.hasDinoCommented(post.url);
+      if (dinoCommented) {
+        console.log(`Post ${post.id} — Dino already commented, skipping.`);
+        continue;
+      }
 
       console.log(`\nReplying to post (${reason}) by ${post.author}:\n"${post.body.slice(0, 100)}"`);
       let response;

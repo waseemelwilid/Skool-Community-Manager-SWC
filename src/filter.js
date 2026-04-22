@@ -25,9 +25,6 @@ export function shouldReplyToPost(post) {
   // Skip very short posts
   if (body.length < 30) return { reply: false, reason: 'too short' };
 
-  // Skip if Dino already commented
-  if (post.dinoAlreadyCommented) return { reply: false, reason: 'dino already commented' };
-
   return { reply: true, reason: 'recent member post' };
 }
 

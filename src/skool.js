@@ -129,13 +129,34 @@ export class SkoolBot {
         });
       });
 
-      // New comments first
-      results.sort((a, b) => (b.hasNewComment ? 1 : 0) - (a.hasNewComment ? 1 : 0));
+      // Sort: freshest posts first (minutes < hours < days), then by hasNewComment as tiebreak
+      const ageScore = text => {
+        const m = text.match(/\b(\d+)([mhd])\s*[•·]/);
+        if (!m) return 9999;
+        const n = parseInt(m[1]);
+        if (m[2] === 'm') return n;
+        if (m[2] === 'h') return n * 60;
+        return n * 1440;
+      };
+      results.sort((a, b) => ageScore(a.body) - ageScore(b.body));
       return results.slice(0, 20);
     }, COMMUNITY_SLUG);
 
     console.log(`Found ${posts.length} posts on feed.`);
     return posts;
+  }
+
+  async hasDinoCommented(postUrl) {
+    await this.page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(3000);
+
+    return await this.page.evaluate(() => {
+      const authorLinks = document.querySelectorAll('a[href^="/@"]');
+      return Array.from(authorLinks).some(link => {
+        const href = (link.getAttribute('href') || '').split('?')[0];
+        return href === '/@dino';
+      });
+    });
   }
 
   async replyToPost(postUrl, reply, authorFirstName = '') {
