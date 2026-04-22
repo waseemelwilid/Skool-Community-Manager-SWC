@@ -186,14 +186,12 @@ export class SkoolBot {
     await commentBox.click();
     await this.page.waitForTimeout(500);
 
-    // @mention the author first if we have their name
+    // @mention the author — type only 2 chars to trigger autocomplete, avoid mid-type click corruption
     if (authorFirstName) {
-      await commentBox.type('@', { delay: 50 });
-      await this.page.waitForTimeout(800);
-      await commentBox.type(authorFirstName, { delay: 80 });
+      const trigger = authorFirstName.slice(0, 2);
+      await commentBox.type('@' + trigger, { delay: 80 });
       await this.page.waitForTimeout(1500);
 
-      // Try clicking the first suggestion in the autocomplete dropdown
       const suggestionSelectors = [
         '[class*="mention"] li:first-child',
         '[class*="suggestion"]:first-child',
@@ -213,13 +211,16 @@ export class SkoolBot {
           break;
         }
       }
+
       if (!picked) {
-        // Fallback: press Enter to pick first suggestion
-        await commentBox.press('Enter');
-        console.log('@mention selected via Enter');
+        // Clear the failed @mention — backspace over "@" + 2 trigger chars
+        await commentBox.press('Escape');
+        for (let i = 0; i < trigger.length + 1; i++) await commentBox.press('Backspace');
+        console.log('@mention failed, writing reply without mention');
+      } else {
+        await this.page.waitForTimeout(300);
+        await commentBox.type(' ', { delay: 30 });
       }
-      await this.page.waitForTimeout(500);
-      await commentBox.type(' ', { delay: 30 }); // space after mention
     }
 
     // Type the reply text
