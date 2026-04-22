@@ -70,13 +70,6 @@ async function run() {
     let dmReplies = 0;
 
     for (const thread of threads.slice(0, 5)) {
-      // Don't filter by hasUnread — DOM detection is unreliable. Use dinoSentLast as the real guard.
-      const dmId = `dm_${thread.sender.toLowerCase().replace(/\s+/g, '_')}`;
-      if (hasReplied(state, dmId)) {
-        console.log(`Already replied to DM from ${thread.sender} this run, skipping.`);
-        continue;
-      }
-
       await bot.openDMThread(thread.index);
       const { text: lastMessage, dinoSentLast } = await bot.getLastMessageInOpenChat();
       const { reply, reason } = shouldReplyToDM(lastMessage, dinoSentLast);
@@ -86,13 +79,12 @@ async function run() {
         continue;
       }
 
-      console.log(`\nReplying to DM (${reason}) from ${thread.sender}:\n"${(lastMessage || '').slice(0, 100)}"`);
+      console.log(`\nReplying to DM from ${thread.sender}:\n"${(lastMessage || '').slice(0, 100)}"`);
       const response = await generateReply(lastMessage, 'dm');
       console.log(`Reply: ${response}`);
 
       const sent = await bot.replyToOpenChat(response);
       if (sent) {
-        markReplied(state, dmId, 'dm');
         dmReplies++;
         await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
       }
