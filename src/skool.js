@@ -258,8 +258,42 @@ export class SkoolBot {
 
   async getUnreadDMs() {
     console.log('Checking DMs...');
-    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/chat`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(6000);
+    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(4000);
+
+    // Click the chat icon in the top nav to open the DM panel
+    const chatIconSelectors = [
+      '[aria-label*="chat" i]',
+      '[aria-label*="message" i]',
+      '[aria-label*="direct" i]',
+      'a[href*="chat"]',
+      'button[class*="chat" i]',
+      'svg[class*="chat" i]',
+    ];
+    let chatOpened = false;
+    for (const sel of chatIconSelectors) {
+      const el = this.page.locator(sel).first();
+      if (await el.count() > 0) {
+        await el.click();
+        chatOpened = true;
+        console.log(`Chat icon clicked via: ${sel}`);
+        break;
+      }
+    }
+    if (!chatOpened) {
+      // Fallback: find the chat bubble icon by its position in the nav bar
+      chatOpened = await this.page.evaluate(() => {
+        const navIcons = document.querySelectorAll('nav a, header a, [class*="nav"] a, [class*="Nav"] a');
+        for (const el of navIcons) {
+          if (el.href?.includes('chat') || el.getAttribute('aria-label')?.toLowerCase().includes('chat')) {
+            el.click(); return true;
+          }
+        }
+        return false;
+      });
+      console.log(`Chat opened via fallback: ${chatOpened}`);
+    }
+    await this.page.waitForTimeout(3000);
 
     const threads = await this.page.evaluate(() => {
       // Find conversation list items — Skool chat is a React SPA, no anchor tags
@@ -303,7 +337,7 @@ export class SkoolBot {
   }
 
   async openDMThread(index) {
-    // Click the conversation at given index in the list (we stay on chat page)
+    // Click the conversation at given index (chat panel already open)
     const clicked = await this.page.evaluate((idx) => {
       const findItems = () => {
         const byRole = document.querySelectorAll('[role="listitem"]');
