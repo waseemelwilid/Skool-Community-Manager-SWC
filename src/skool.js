@@ -362,7 +362,10 @@ export class SkoolBot {
         console.log('Items from page fallback:', items.length);
       }
 
+      // Deduplicate: remove parent elements that contain another matching element (keep innermost)
+      items = items.filter(el => !items.some(other => other !== el && el.contains(other)));
       items = items.slice(0, 10);
+      console.log('Items after dedup:', items.length);
       return items.map((el, index) => {
         const text = el.innerText?.trim() || '';
         const lines = text.split('\n').filter(l => l.trim());
@@ -411,6 +414,8 @@ export class SkoolBot {
                  rect.width > 100 && hasSep(text) && text.length < 300;
         });
       }
+      // Keep only innermost matching elements (no parent-child duplicates)
+      items = items.filter(el => !items.some(other => other !== el && el.contains(other)));
       if (items[idx]) { items[idx].click(); return true; }
       return false;
     }, index);
@@ -420,39 +425,43 @@ export class SkoolBot {
   }
 
   async getLastMessageInOpenChat() {
-    await this.page.waitForTimeout(1000);
+    await this.page.waitForTimeout(1500);
     return await this.page.evaluate(() => {
-      // Try class-name-based selectors first
-      const classSelectors = [
-        '[class*="MessageBody"]', '[class*="message-body"]',
-        '[class*="MessageText"]', '[class*="message-text"]',
-        '[class*="BubbleText"]', '[class*="bubble-text"]',
-        '[class*="ChatText"]', '[class*="chat-text"]',
-        '[class*="msg-text"]', '[class*="MsgText"]',
-      ];
+      // Strategy: find the DM reply input first, then find the message thread above it.
+      // This avoids accidentally reading the DM list panel instead of the open thread.
+      const inputEl = Array.from(document.querySelectorAll('[contenteditable="true"], textarea'))
+        .find(el => {
+          const rect = el.getBoundingClientRect();
+          // DM input is near the bottom of its panel — bottom 40% of viewport
+          return rect.top > window.innerHeight * 0.4 && rect.width > 100;
+        });
+
       let bubbles = [];
-      for (const sel of classSelectors) {
-        const els = Array.from(document.querySelectorAll(sel))
-          .filter(e => (e.innerText?.trim().length || 0) > 2);
-        if (els.length) { bubbles = els; console.log('Bubbles via:', sel, els.length); break; }
+
+      if (inputEl) {
+        // Walk up from the input to find the thread container (has multiple text children)
+        let container = inputEl.parentElement;
+        for (let i = 0; i < 8; i++) {
+          if (!container) break;
+          const textEls = Array.from(container.querySelectorAll('p, span'))
+            .filter(el => (el.innerText?.trim().length || 0) > 5 && el.querySelectorAll('p,span').length < 3);
+          if (textEls.length >= 2) { bubbles = textEls; console.log('Bubbles via inputEl container, depth:', i, 'count:', bubbles.length); break; }
+          container = container.parentElement;
+        }
       }
 
-      // Fallback: find chat scroll area then collect p/span with text
+      // Fallback: class-name-based
       if (!bubbles.length) {
-        const chatArea = Array.from(document.querySelectorAll('div')).find(el => {
-          const style = window.getComputedStyle(el);
-          const rect = el.getBoundingClientRect();
-          return (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
-                 rect.height > 200 && rect.width > 200;
-        });
-        if (chatArea) {
-          bubbles = Array.from(chatArea.querySelectorAll('p, span, div'))
-            .filter(el => {
-              const text = el.innerText?.trim() || '';
-              const children = el.querySelectorAll('p, span, div').length;
-              return text.length > 5 && text.length < 2000 && children < 3;
-            });
-          console.log('Bubbles via chatArea scroll:', bubbles.length);
+        const classSelectors = [
+          '[class*="MessageBody"]', '[class*="message-body"]',
+          '[class*="MessageText"]', '[class*="message-text"]',
+          '[class*="BubbleText"]', '[class*="bubble-text"]',
+          '[class*="ChatText"]', '[class*="chat-text"]',
+        ];
+        for (const sel of classSelectors) {
+          const els = Array.from(document.querySelectorAll(sel))
+            .filter(e => (e.innerText?.trim().length || 0) > 2);
+          if (els.length) { bubbles = els; console.log('Bubbles via class:', sel, els.length); break; }
         }
       }
 
@@ -461,7 +470,7 @@ export class SkoolBot {
       const last = bubbles[bubbles.length - 1];
       const text = last.innerText?.trim() || '';
 
-      // Detect outgoing: class-based first, then computed style (align-self: flex-end = outgoing)
+      // Detect outgoing: class-based, computed style, or position (right-aligned bubble)
       let el = last;
       let dinoSentLast = false;
       for (let i = 0; i < 8; i++) {
@@ -484,10 +493,33 @@ export class SkoolBot {
   }
 
   async replyToOpenChat(reply) {
-    // Skool uses TipTap/ProseMirror — fill() doesn't work, must force-click then type
-    const editor = this.page.locator('[contenteditable="true"][class*="ProseMirror"], [contenteditable="true"][class*="skool-editor"], [contenteditable="true"]').first();
+    // Wait briefly for thread to settle, then find the DM input.
+    // Must use .last() — the feed compose box may also be contenteditable and appears first in DOM.
+    // The DM reply input is lower in the DOM (rendered inside the chat panel).
+    await this.page.waitForTimeout(500);
 
-    if (await editor.count() === 0) { console.log('No DM input found, skipping.'); return false; }
+    // Wait up to 5s for a contenteditable to appear in the bottom half of the viewport
+    let editor = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const handle = await this.page.evaluateHandle(() => {
+        return Array.from(document.querySelectorAll('[contenteditable="true"], textarea'))
+          .reverse() // last in DOM = DM input
+          .find(el => {
+            const rect = el.getBoundingClientRect();
+            return rect.top > window.innerHeight * 0.3 && rect.width > 50;
+          }) || null;
+      });
+      if (handle && await handle.evaluate(el => !!el)) {
+        editor = this.page.locator('[contenteditable="true"], textarea').last();
+        break;
+      }
+      await this.page.waitForTimeout(1000);
+    }
+
+    if (!editor || await editor.count() === 0) {
+      console.log('No DM input found, skipping.');
+      return false;
+    }
 
     await editor.click({ force: true });
     await this.page.waitForTimeout(500);
