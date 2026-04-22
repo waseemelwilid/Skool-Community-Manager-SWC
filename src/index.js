@@ -70,29 +70,34 @@ async function run() {
     let dmReplies = 0;
 
     for (const thread of threads) {
-      if (!thread.url) continue;
-      if (hasReplied(state, thread.id)) {
-        console.log(`Already replied to DM ${thread.id}, skipping.`);
+      if (!thread.hasUnread) continue;
+
+      // Use sender name as DM id — unread flag resets after we reply so no double-send risk
+      const dmId = `dm_${thread.sender.toLowerCase().replace(/\s+/g, '_')}`;
+      if (hasReplied(state, dmId)) {
+        console.log(`Already replied to DM from ${thread.sender} this run, skipping.`);
         continue;
       }
 
-      const lastMessage = await bot.getLastDMInThread(thread.url);
+      await bot.openDMThread(thread.index);
+      const lastMessage = await bot.getLastMessageInOpenChat();
       const { reply, reason } = shouldReplyToDM(lastMessage, thread.sender);
 
       if (!reply) {
-        console.log(`Skipping DM ${thread.id}: ${reason}`);
+        console.log(`Skipping DM from ${thread.sender}: ${reason}`);
         continue;
       }
 
-      console.log(`\nReplying to DM (${reason}) from ${thread.sender}:\n"${lastMessage.slice(0, 100)}..."`);
+      console.log(`\nReplying to DM (${reason}) from ${thread.sender}:\n"${(lastMessage || '').slice(0, 100)}"`);
       const response = await generateReply(lastMessage, 'dm');
       console.log(`Reply: ${response}`);
 
-      await bot.replyToDM(thread.url, response);
-      markReplied(state, thread.id, 'dm');
-      dmReplies++;
-
-      await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      const sent = await bot.replyToOpenChat(response);
+      if (sent) {
+        markReplied(state, dmId, 'dm');
+        dmReplies++;
+        await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      }
     }
 
     // --- RE-ENGAGEMENT DMs ---

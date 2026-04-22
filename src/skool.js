@@ -258,75 +258,99 @@ export class SkoolBot {
 
   async getUnreadDMs() {
     console.log('Checking DMs...');
-
-    // Skool chat is at /selfworkacademy/chat
     await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/chat`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(5000);
-    console.log('Chat page URL:', this.page.url());
+    await this.page.waitForTimeout(6000);
 
-    // Skool chat is a React SPA with no <a> tags — find clickable conversation rows
-    const threadCount = await this.page.evaluate(() => {
-      // Look for conversation list items (divs/li with click handlers)
-      const candidates = document.querySelectorAll('[class*="conversation"], [class*="thread"], [class*="chat-item"], [class*="message-item"], [class*="inbox-item"]');
-      console.log('Chat candidates found:', candidates.length);
-      return candidates.length;
-    });
-    console.log(`Chat conversation candidates: ${threadCount}`);
+    const threads = await this.page.evaluate(() => {
+      // Find conversation list items — Skool chat is a React SPA, no anchor tags
+      // Strategy: find repeated sibling elements that contain an avatar image + text
+      const findItems = () => {
+        // Try known role/class patterns first
+        const byRole = document.querySelectorAll('[role="listitem"]');
+        if (byRole.length > 1) return Array.from(byRole);
 
-    // Get all clickable items in the chat panel that look like conversations
-    const conversations = await this.page.evaluate(() => {
-      const results = [];
-      // Find all elements that could be conversation rows
-      const selectors = [
-        '[class*="conversation"]',
-        '[class*="thread"]',
-        '[class*="chat-item"]',
-        '[class*="message-preview"]',
-        '[class*="inbox"]',
-      ];
-      const seen = new Set();
-      for (const sel of selectors) {
-        document.querySelectorAll(sel).forEach((el, i) => {
-          const text = el.innerText?.trim();
-          if (!text || seen.has(text)) return;
-          seen.add(text);
-          const hasUnread = !!(el.querySelector('[class*="unread"], [class*="badge"], [class*="dot"]'))
-            || /\(\d+\)/.test(text);
-          results.push({ index: results.length, text: text.slice(0, 100), hasUnread });
+        const patterns = ['DirectMessage', 'Conversation', 'ChatRow', 'ThreadRow', 'InboxItem', 'MessageItem'];
+        for (const p of patterns) {
+          const found = document.querySelectorAll(`[class*="${p}"]`);
+          if (found.length > 0) return Array.from(found);
+        }
+
+        // Fallback: divs that contain an avatar img and have short height (typical chat row)
+        return Array.from(document.querySelectorAll('div')).filter(el => {
+          const rect = el.getBoundingClientRect();
+          const hasAvatar = !!(el.querySelector('img[class*="avatar" i], img[class*="Avatar"], [class*="avatar" i] img'));
+          const text = el.innerText?.trim() || '';
+          return hasAvatar && text.length > 2 && rect.height > 20 && rect.height < 110 && rect.width > 150;
         });
-      }
-      return results;
+      };
+
+      const items = findItems().slice(0, 15);
+      console.log('DM items found:', items.length);
+
+      return items.map((el, index) => {
+        const text = el.innerText?.trim() || '';
+        const lines = text.split('\n').filter(l => l.trim());
+        const sender = lines[0] || `unknown_${index}`;
+        const hasUnread = !!(
+          el.querySelector('[class*="nread"], [class*="badge" i], [class*="dot"]:not([class*="dotted"])')
+        ) || /\(\d+\)/.test(text);
+        return { index, sender: sender.trim(), hasUnread, preview: text.slice(0, 80) };
+      });
     });
 
-    console.log('Chat conversations found:', JSON.stringify(conversations));
-    // Return empty for now — DMs need click-based interaction built separately
-    return [];
+    console.log(`DM threads found: ${threads.length}`, threads.map(t => `${t.sender}(unread:${t.hasUnread})`).join(', '));
+    return threads;
   }
 
-  async getLastDMInThread(threadUrl) {
-    await this.page.goto(threadUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(3000);
+  async openDMThread(index) {
+    // Click the conversation at given index in the list (we stay on chat page)
+    const clicked = await this.page.evaluate((idx) => {
+      const findItems = () => {
+        const byRole = document.querySelectorAll('[role="listitem"]');
+        if (byRole.length > 1) return Array.from(byRole);
+        const patterns = ['DirectMessage', 'Conversation', 'ChatRow', 'ThreadRow', 'InboxItem', 'MessageItem'];
+        for (const p of patterns) {
+          const found = document.querySelectorAll(`[class*="${p}"]`);
+          if (found.length > 0) return Array.from(found);
+        }
+        return Array.from(document.querySelectorAll('div')).filter(el => {
+          const rect = el.getBoundingClientRect();
+          const hasAvatar = !!(el.querySelector('img[class*="avatar" i], img[class*="Avatar"], [class*="avatar" i] img'));
+          const text = el.innerText?.trim() || '';
+          return hasAvatar && text.length > 2 && rect.height > 20 && rect.height < 110 && rect.width > 150;
+        });
+      };
+      const items = findItems();
+      if (items[idx]) { items[idx].click(); return true; }
+      return false;
+    }, index);
 
-    try {
-      await this.page.waitForSelector('[class*="message"], [class*="chat"], [class*="bubble"]', { timeout: 8000 });
-    } catch { /* continue */ }
+    await this.page.waitForTimeout(2500);
+    return clicked;
+  }
 
+  async getLastMessageInOpenChat() {
     return await this.page.evaluate(() => {
-      const selectors = ['[class*="message-body"]', '[class*="message"]', '[class*="bubble"]', '[class*="chat-text"]', 'p'];
+      // Messages are in the right panel — get the last visible message bubble
+      const selectors = [
+        '[class*="MessageBody"]', '[class*="message-body"]',
+        '[class*="MessageText"]', '[class*="message-text"]',
+        '[class*="BubbleText"]', '[class*="bubble-text"]',
+        '[class*="ChatText"]',
+      ];
       for (const sel of selectors) {
         const els = document.querySelectorAll(sel);
-        const texts = Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 3);
+        const texts = Array.from(els).map(e => e.innerText?.trim()).filter(t => t && t.length > 2);
         if (texts.length) return texts[texts.length - 1];
       }
-      return '';
+      // Broad fallback: paragraphs inside the right half of the page
+      const allP = document.querySelectorAll('p');
+      const texts = Array.from(allP).map(e => e.innerText?.trim()).filter(t => t && t.length > 5);
+      return texts[texts.length - 1] || '';
     });
   }
 
-  async replyToDM(threadUrl, reply) {
-    console.log(`Replying to DM: ${threadUrl}`);
-    await this.page.goto(threadUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await this.page.waitForTimeout(2000);
-
+  async replyToOpenChat(reply) {
     const inputSelectors = [
       '[placeholder*="message" i]',
       '[placeholder*="reply" i]',
@@ -340,7 +364,7 @@ export class SkoolBot {
       if (await el.count() > 0) { inputBox = el; break; }
     }
 
-    if (!inputBox) { console.log('Could not find DM input, skipping.'); return; }
+    if (!inputBox) { console.log('No DM input found, skipping.'); return false; }
 
     await inputBox.click();
     await inputBox.fill(reply);
@@ -348,6 +372,7 @@ export class SkoolBot {
     await inputBox.press('Enter');
     await this.page.waitForTimeout(2000);
     console.log('DM reply sent.');
+    return true;
   }
 
   async sendNewDM(profileUrl, message) {
