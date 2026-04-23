@@ -32,5 +32,9 @@ export function shouldReplyToDM(lastMessage, dinoSentLast) {
   if (!lastMessage || lastMessage.length < 5) return { reply: false, reason: 'empty' };
   if (dinoSentLast) return { reply: false, reason: 'dino sent last' };
   if (lastMessage.length < 15) return { reply: false, reason: 'dead reply' };
+  // Skip pure acknowledgments — nothing to add
+  if (/^(nice|great|thanks?|thank you|got it|will do|sounds good|perfect|ok|okay|cool|sure|cheers|appreciate it|no worries|makes sense|noted|understood|alright|lol|haha|👍|🙏|😂)[.!,\s]*$/i.test(lastMessage.trim())) {
+    return { reply: false, reason: 'dead acknowledgment' };
+  }
   return { reply: true, reason: 'member message' };
 }

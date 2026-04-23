@@ -82,6 +82,7 @@ async function run() {
       let response;
       try {
         response = await generateReply(thread.lastMessage, 'dm');
+        response = response.replace(/^["'""''`]+|["'""''`]+$/g, '').trim();
         console.log(`Reply: ${response}`);
       } catch (err) {
         console.log(`Claude API error for DM: ${err.message}`);

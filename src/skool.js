@@ -376,9 +376,13 @@ export class SkoolBot {
           .replace(/[\u00b7\u2022].*/, '')
           .trim();
         // Lines 1+: message preview. "You: ..." means Dino sent last.
+        // Skool prefixes preview lines with "• 16h " — strip that before extracting message.
         const rawPreview = lines.slice(1).join(' ').trim();
         const dinoSentLast = /^you[:\s]/i.test(rawPreview);
-        const lastMessage = rawPreview.replace(/^you[:\s]+/i, '').trim();
+        const lastMessage = rawPreview
+          .replace(/^you[:\s]+/i, '')
+          .replace(/^[·•·•]\s*\d+[smhd]\s*/i, '')
+          .trim();
         console.log(`DM ${index}: sender="${sender}" dinoSentLast=${dinoSentLast} msg="${lastMessage.slice(0, 60)}"`);
         return { index, sender, lastMessage, dinoSentLast, preview: text.slice(0, 100) };
       }).filter(t => t.sender && t.sender.length > 1 && !/^\d+$/.test(t.sender));
