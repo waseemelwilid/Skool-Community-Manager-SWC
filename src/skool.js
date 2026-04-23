@@ -190,42 +190,6 @@ export class SkoolBot {
     await commentBox.click();
     await this.page.waitForTimeout(500);
 
-    // @mention the author — type full name, then check for dropdown after
-    if (authorFirstName) {
-      await commentBox.type('@' + authorFirstName, { delay: 80 });
-      await this.page.waitForTimeout(1800);
-
-      const suggestionSelectors = [
-        '[class*="mention"] li:first-child',
-        '[class*="suggestion"]:first-child',
-        '[class*="autocomplete"] [class*="item"]:first-child',
-        '[class*="dropdown"] li:first-child',
-        '[role="listbox"] [role="option"]:first-child',
-        '[role="option"]:first-child',
-      ];
-
-      let picked = false;
-      for (const sel of suggestionSelectors) {
-        const el = this.page.locator(sel).first();
-        if (await el.count() > 0) {
-          await el.click();
-          picked = true;
-          console.log(`@mention selected via: ${sel}`);
-          break;
-        }
-      }
-
-      if (!picked) {
-        // No dropdown — clear the @mention and write reply without it
-        await commentBox.press('Escape');
-        for (let i = 0; i < authorFirstName.length + 1; i++) await commentBox.press('Backspace');
-        console.log('@mention failed, writing reply without mention');
-      } else {
-        await this.page.waitForTimeout(300);
-        await commentBox.type(' ', { delay: 30 });
-      }
-    }
-
     // Type the reply text
     await commentBox.type(reply, { delay: 30 });
     await this.page.waitForTimeout(1000);
