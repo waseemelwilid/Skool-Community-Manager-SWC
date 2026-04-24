@@ -133,17 +133,9 @@ export class SkoolBot {
         });
       });
 
-      // Sort: freshest posts first (minutes < hours < days), then by hasNewComment as tiebreak
-      const ageScore = text => {
-        const m = text.match(/\b(\d+)([mhd])\s*[•·]/);
-        if (!m) return 9999;
-        const n = parseInt(m[1]);
-        if (m[2] === 'm') return n;
-        if (m[2] === 'h') return n * 60;
-        return n * 1440;
-      };
-      results.sort((a, b) => ageScore(a.body) - ageScore(b.body));
-      return results.slice(0, 20);
+      // Keep DOM order (Skool shows pinned posts first, then newest-first).
+      // Skip the first 3 (pinned), return up to 20 of the remainder.
+      return results.slice(3, 23);
     }, COMMUNITY_SLUG);
 
     console.log(`Found ${posts.length} posts on feed.`);
