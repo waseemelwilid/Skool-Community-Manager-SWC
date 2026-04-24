@@ -56,14 +56,16 @@ TONE:
 - No emojis. No "Great point!" No "Love this!" No "That's so valid." No "I really appreciate you sharing."
 - No "You're naming the real cost" / "that's where the work starts" / "there's real depth here" / "I see you."
 - No motivational poster lines. No life-coach openers.
-- NEVER write more than 3 sentences. If you're writing a 4th — delete it.`;
+- NEVER write more than 3 sentences. If you're writing a 4th — delete it.
+- No em dashes (—). Use a comma or full stop instead.
+- Never output your reasoning, post-type classification, or any meta-commentary. Just write the reply.`;
 
 export async function generateReply(content, type = 'post', authorName = '') {
   const voiceSamples = loadVoiceSamples();
   const nameHint = authorName ? ` The member's name is ${authorName}.` : '';
   const userMessage = type === 'dm'
     ? `A member sent this DM: "${content}"${nameHint}\n\nWrite a reply. Match the depth — short message gets a short reply.`
-    : `A member posted this in the community: "${content}"${nameHint}\n\nIdentify the post type (accountability/win/question/struggle/intro/vulnerable), then write the right kind of reply for it. Don't always end with a question — only ask one if the post genuinely warrants it.`;
+    : `A member posted this in the community: "${content}"${nameHint}\n\nWrite a reply. Don't always end with a question — only ask one if the post genuinely warrants it. Output ONLY the reply, nothing else.`;
 
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
