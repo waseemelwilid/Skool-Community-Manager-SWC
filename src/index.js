@@ -1,6 +1,6 @@
 import { SkoolBot } from './skool.js';
 import { generateReply, generateReengagementDM } from './claude.js';
-import { loadState, saveState, hasReplied, markReplied, updateMemberSeen, getInactiveMembers, markReengagementSent } from './state.js';
+import { loadState, saveState, hasReplied, markReplied, updateMemberSeen, getInactiveMembers, markReengagementSent, dmAlreadyReplied, markDMReplied } from './state.js';
 import { shouldReplyToPost, shouldReplyToDM } from './filter.js';
 
 const EMAIL = process.env.SKOOL_EMAIL;
@@ -70,6 +70,12 @@ async function run() {
     let dmReplies = 0;
 
     for (const thread of threads.slice(0, 5)) {
+      // Skip if we already replied to this exact message in a previous run
+      if (dmAlreadyReplied(state, thread.sender, thread.lastMessage)) {
+        console.log(`Skipping DM from ${thread.sender}: already replied to this message`);
+        continue;
+      }
+
       // Filter using preview text extracted directly from DM list — no need to open thread just to read
       const { reply, reason } = shouldReplyToDM(thread.lastMessage, thread.dinoSentLast);
 
@@ -92,6 +98,7 @@ async function run() {
       await bot.openDMThread(thread.index);
       const sent = await bot.replyToOpenChat(response);
       if (sent) {
+        markDMReplied(state, thread.sender, thread.lastMessage);
         dmReplies++;
         await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
       }

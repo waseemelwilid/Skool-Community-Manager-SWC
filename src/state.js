@@ -61,3 +61,15 @@ export function markReengagementSent(state, memberName) {
   if (!state.memberActivity[memberName]) state.memberActivity[memberName] = {};
   state.memberActivity[memberName].reengagementSent = new Date().toISOString();
 }
+
+// Track the last DM preview we replied to per sender.
+// If the preview hasn't changed since we last replied, skip — we already answered this message.
+export function dmAlreadyReplied(state, sender, lastMessage) {
+  if (!state.dmLastReplied) return false;
+  return state.dmLastReplied[sender] === lastMessage;
+}
+
+export function markDMReplied(state, sender, lastMessage) {
+  if (!state.dmLastReplied) state.dmLastReplied = {};
+  state.dmLastReplied[sender] = lastMessage;
+}
