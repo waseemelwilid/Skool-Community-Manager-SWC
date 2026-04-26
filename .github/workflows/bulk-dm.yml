@@ -1,6 +1,8 @@
 name: Bulk DM
 
 on:
+  schedule:
+    - cron: '0 18 * * 6'  # Every Saturday 7pm BST (18:00 UTC)
   workflow_dispatch:
     inputs:
       message:
@@ -21,5 +23,5 @@ jobs:
         env:
           SKOOL_EMAIL: ${{ secrets.SKOOL_EMAIL }}
           SKOOL_PASSWORD: ${{ secrets.SKOOL_PASSWORD }}
-          BULK_MESSAGE: ${{ inputs.message }}
+          BULK_MESSAGE: ${{ inputs.message || 'just a quick reminder we have our roleplay call tomorrow at 7pm uk time, would love to see you there!' }}
         run: node src/bulk-dm.js
