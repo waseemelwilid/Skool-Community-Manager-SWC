@@ -1,0 +1,25 @@
+name: Bulk DM
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Message to send to all members'
+        required: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npx playwright install chromium --with-deps
+      - name: Send bulk DM
+        env:
+          SKOOL_EMAIL: ${{ secrets.SKOOL_EMAIL }}
+          SKOOL_PASSWORD: ${{ secrets.SKOOL_PASSWORD }}
+          BULK_MESSAGE: ${{ inputs.message }}
+        run: node src/bulk-dm.js

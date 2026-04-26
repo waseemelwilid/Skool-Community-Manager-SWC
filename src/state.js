@@ -66,10 +66,19 @@ export function markReengagementSent(state, memberName) {
 // If the preview hasn't changed since we last replied, skip — we already answered this message.
 export function dmAlreadyReplied(state, sender, lastMessage) {
   if (!state.dmLastReplied) return false;
-  return state.dmLastReplied[sender] === lastMessage;
+  const record = state.dmLastReplied[sender];
+  if (!record) return false;
+  // Skip if preview matches the member's message we already replied to
+  if (record.memberMsg === lastMessage) return true;
+  // Skip if preview matches the start of our own reply (Skool shows our message as preview after we reply)
+  if (record.ourReply && lastMessage && record.ourReply.slice(0, 50) === lastMessage.slice(0, 50)) return true;
+  return false;
 }
 
-export function markDMReplied(state, sender, lastMessage) {
+export function markDMReplied(state, sender, memberMsg, ourReply) {
   if (!state.dmLastReplied) state.dmLastReplied = {};
-  state.dmLastReplied[sender] = lastMessage;
+  state.dmLastReplied[sender] = {
+    memberMsg,
+    ourReply: (ourReply || '').slice(0, 80),
+  };
 }

@@ -24,11 +24,6 @@ async function run() {
     let postReplies = 0;
 
     for (const post of posts.slice(0, 20)) { // max 20 per run
-      if (hasReplied(state, post.id)) {
-        console.log(`Already replied to post ${post.id}, skipping.`);
-        continue;
-      }
-
       const { reply, reason } = shouldReplyToPost(post);
       console.log(`Post ${post.id} | age:${(post.body||'').match(/\b\d+[dwm]\s*[•·]/)?.[0]||'?'} | ${reply ? 'CHECK' : 'SKIP'} — ${reason}`);
       if (!reply) continue;
@@ -98,7 +93,7 @@ async function run() {
       await bot.openDMThread(thread.index);
       const sent = await bot.replyToOpenChat(response);
       if (sent) {
-        markDMReplied(state, thread.sender, thread.lastMessage);
+        markDMReplied(state, thread.sender, thread.lastMessage, response);
         dmReplies++;
         await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
       }
