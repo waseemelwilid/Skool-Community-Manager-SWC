@@ -68,10 +68,16 @@ export function dmAlreadyReplied(state, sender, lastMessage) {
   if (!state.dmLastReplied) return false;
   const record = state.dmLastReplied[sender];
   if (!record) return false;
-  // Skip if preview matches the member's message we already replied to
-  if (record.memberMsg === lastMessage) return true;
-  // Skip if preview matches the start of our own reply (Skool shows our message as preview after we reply)
-  if (record.ourReply && lastMessage && record.ourReply.slice(0, 50) === lastMessage.slice(0, 50)) return true;
+
+  // Old format was a plain string — we can't know what our reply text was,
+  // so skip conservatively. Next real member message will overwrite with new format.
+  if (typeof record === 'string') return true;
+
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().slice(0, 50);
+  // Skip if preview matches member's message we already replied to
+  if (norm(record.memberMsg) === norm(lastMessage)) return true;
+  // Skip if preview matches our own reply (bot's message now showing as list preview)
+  if (record.ourReply && norm(record.ourReply) === norm(lastMessage)) return true;
   return false;
 }
 
