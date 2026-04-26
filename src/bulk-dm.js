@@ -1,5 +1,4 @@
 import { SkoolBot } from './skool.js';
-import { loadState } from './state.js';
 
 const EMAIL = process.env.SKOOL_EMAIL;
 const PASSWORD = process.env.SKOOL_PASSWORD;
@@ -15,29 +14,25 @@ if (!MESSAGE) {
 }
 
 async function run() {
-  const state = loadState();
-  const members = Object.entries(state.memberActivity || {})
-    .filter(([, data]) => data.profileUrl)
-    .map(([name, data]) => ({ name, profileUrl: data.profileUrl }));
-
-  console.log(`Sending bulk DM to ${members.length} members: "${MESSAGE}"`);
-
   const bot = new SkoolBot();
   try {
     await bot.init();
     await bot.login(EMAIL, PASSWORD);
 
+    const members = await bot.getAllMembers();
+    console.log(`\nSending bulk DM to ${members.length} members:\n"${MESSAGE}"\n`);
+
     let sent = 0;
     for (const member of members) {
-      console.log(`Sending to ${member.name}...`);
+      console.log(`Sending to ${member.name} (${member.profileUrl})...`);
       try {
         const ok = await bot.sendNewDM(member.profileUrl, MESSAGE);
-        if (ok) { sent++; console.log(`Sent to ${member.name}`); }
-        else { console.log(`Failed to send to ${member.name}`); }
+        if (ok) { sent++; console.log(`  ✓ Sent`); }
+        else { console.log(`  ✗ Failed`); }
       } catch (err) {
-        console.log(`Error sending to ${member.name}: ${err.message}`);
+        console.log(`  ✗ Error: ${err.message}`);
       }
-      await new Promise(r => setTimeout(r, 4000 + Math.random() * 3000));
+      await new Promise(r => setTimeout(r, 5000 + Math.random() * 4000));
     }
 
     console.log(`\nDone. Sent to ${sent}/${members.length} members.`);

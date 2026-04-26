@@ -543,6 +543,45 @@ export class SkoolBot {
     return true;
   }
 
+  async getAllMembers() {
+    console.log('Scraping members page...');
+    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/-/members`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.page.waitForTimeout(4000);
+
+    let lastCount = 0;
+    // Scroll to load all members (infinite scroll)
+    for (let i = 0; i < 30; i++) {
+      await this.page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await this.page.waitForTimeout(1500);
+      const count = await this.page.evaluate(() =>
+        document.querySelectorAll('a[href^="/@"]').length
+      );
+      if (count === lastCount) break;
+      lastCount = count;
+    }
+
+    const members = await this.page.evaluate(() => {
+      const seen = new Set();
+      const results = [];
+      document.querySelectorAll('a[href^="/@"]').forEach(link => {
+        const href = link.getAttribute('href') || '';
+        // Skip Dino's own profile
+        if (href === '/@dino' || href.startsWith('/@dino?')) return;
+        const profileUrl = `https://www.skool.com${href.split('?')[0]}`;
+        if (seen.has(profileUrl)) return;
+        seen.add(profileUrl);
+        // Name: from slug e.g. /@muhammad-sangaaf-1234 → "muhammad sangaaf"
+        const slug = href.split('?')[0].replace('/@', '').replace(/-\d+$/, '').replace(/-/g, ' ');
+        const name = link.innerText?.trim() || slug;
+        results.push({ name: name || slug, profileUrl });
+      });
+      return results;
+    });
+
+    console.log(`Found ${members.length} members.`);
+    return members;
+  }
+
   async close() {
     if (this.browser) await this.browser.close();
   }
