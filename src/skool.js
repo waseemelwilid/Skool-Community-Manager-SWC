@@ -498,49 +498,34 @@ export class SkoolBot {
   }
 
   async sendNewDM(profileUrl, message) {
-    console.log(`Sending re-engagement DM via profile: ${profileUrl}`);
-    await this.page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // Use the CHAT button on the members page — profile pages don't reliably have a Message button
+    console.log(`Sending DM via members page: ${profileUrl}`);
+    await this.page.goto(`${BASE_URL}/${COMMUNITY_SLUG}/-/members`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await this.page.waitForTimeout(3000);
 
-    const msgSelectors = [
-      'button:has-text("Message")',
-      'button:has-text("DM")',
-      'a:has-text("Message")',
-      '[aria-label*="message" i]',
-    ];
+    const slugMatch = profileUrl.match(/(\/@[^/?]+)/);
+    if (!slugMatch) { console.log(`Cannot extract slug from ${profileUrl}, skipping.`); return false; }
+    const memberSlug = slugMatch[1];
 
-    let msgBtn = null;
-    for (const sel of msgSelectors) {
-      const el = this.page.locator(sel).first();
-      if (await el.count() > 0) { msgBtn = el; break; }
-    }
+    const clicked = await this.page.evaluate((slug) => {
+      const memberLink = document.querySelector(`a[href^="${slug}"]`);
+      if (!memberLink) { console.log(`Member link not found for ${slug}`); return false; }
+      let container = memberLink.parentElement;
+      for (let i = 0; i < 8; i++) {
+        if (!container) break;
+        const chatBtn = Array.from(container.querySelectorAll('button'))
+          .find(b => /^chat$/i.test(b.innerText?.trim()));
+        if (chatBtn) { chatBtn.click(); console.log(`Clicked CHAT for ${slug}`); return true; }
+        container = container.parentElement;
+      }
+      console.log(`No CHAT button found for ${slug}`);
+      return false;
+    }, memberSlug);
 
-    if (!msgBtn) { console.log('No Message button found on profile, skipping.'); return false; }
+    if (!clicked) { console.log(`Could not click CHAT for ${profileUrl}, skipping.`); return false; }
 
-    await msgBtn.click();
-    await this.page.waitForTimeout(2000);
-
-    const inputSelectors = [
-      '[placeholder*="message" i]',
-      '[contenteditable="true"]',
-      'textarea',
-    ];
-
-    let inputBox = null;
-    for (const sel of inputSelectors) {
-      const el = this.page.locator(sel).first();
-      if (await el.count() > 0) { inputBox = el; break; }
-    }
-
-    if (!inputBox) { console.log('No DM compose box found, skipping.'); return false; }
-
-    await inputBox.click();
-    await inputBox.fill(message);
-    await this.page.waitForTimeout(500);
-    await inputBox.press('Enter');
-    await this.page.waitForTimeout(2000);
-    console.log('Re-engagement DM sent.');
-    return true;
+    await this.page.waitForTimeout(2500);
+    return await this.replyToOpenChat(message);
   }
 
   async getAllMembers() {
